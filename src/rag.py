@@ -38,19 +38,31 @@ class RAG(Agent):
         )
         # Recharge la collection courante (droit en vigueur uniquement).
         self.db = VectorDB(config, config.COLLECTION_NAME)
+        # Prompt de l'étage de décomposition (second rôle du même agent).
+        with open(config.DECOMPOSE_PROMPT_PATH, encoding="utf-8") as f:
+            self.decompose_prompt = f.read()
 
     # ------------------------------------------------------------------ #
     # 1. Décomposition                                                    #
     # ------------------------------------------------------------------ #
     def _decompose(self, question):
-        """v1 : une question = une recherche (liste à un élément).
+        """Découpe le message en 1 à MAX_SOUS_QUESTIONS sous-questions de
+        recherche autonomes, reformulées en vocabulaire juridique (un appel
+        LLM court, température 0 — améliorations « reformulation » et
+        « questions multiples » du jalon 6).
 
-        Toute la chaîne aval travaille déjà sur des listes : au jalon 6, la
-        décomposition des questions multiples/complexes (ou le mode
-        comparaison) remplacera ce corps par un appel LLM court, sans toucher
-        au reste du pipeline.
+        Filet de sécurité : si l'appel échoue ou renvoie du vide, la question
+        d'origine part telle quelle en recherche — la décomposition ne doit
+        jamais pouvoir casser le pipeline.
         """
-        return [question]
+        try:
+            brut = self._complete(self.decompose_prompt, question)
+        except Exception:
+            return [question]
+        sous_questions = [
+            ligne.strip(" -•*\t") for ligne in brut.splitlines() if ligne.strip()
+        ]
+        return sous_questions[: config.MAX_SOUS_QUESTIONS] or [question]
 
     # ------------------------------------------------------------------ #
     # 2. Retrieval (un par sous-question, fusion dédoublonnée)            #
@@ -65,8 +77,10 @@ class RAG(Agent):
                 if cle not in vus or chunk["distance"] < vus[cle]["distance"]:
                     vus[cle] = chunk
         chunks = sorted(vus.values(), key=lambda c: c["distance"])
-        # Garde-fou : au plus N_CHUNKS par sous-question dans le contexte.
-        return chunks[: config.N_CHUNKS * len(questions)]
+        # Garde-fou : k par sous-question, plafonné globalement pour que le
+        # contexte du LLM ne se noie pas (cf. config.N_CHUNKS_MAX_TOTAL).
+        plafond = min(config.N_CHUNKS * len(questions), config.N_CHUNKS_MAX_TOTAL)
+        return chunks[:plafond]
 
     # ------------------------------------------------------------------ #
     # 3. Prompt système                                                   #
@@ -129,6 +143,9 @@ class RAG(Agent):
 
         return {
             "reponse": reponse,
+            # Observabilité : les sous-questions réellement recherchées sont
+            # exposées — l'utilisateur (et le smoke test) VOIT la décomposition.
+            "sous_questions": sous_questions,
             "sources": sources,
             "citations_non_verifiees": non_verifiees,
             "date_corpus": chunks[0]["metadata"]["date_extraction"]
