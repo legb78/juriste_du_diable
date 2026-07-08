@@ -1,0 +1,10 @@
+# Corpus (API Légifrance, option A)
+requests
+
+# Indexation / base vectorielle
+sentence-transformers
+chromadb
+
+# Génération + configuration
+groq
+python-dotenv
