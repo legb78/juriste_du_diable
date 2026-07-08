@@ -36,6 +36,12 @@ LLM_TEMPERATURE = 0.0
 # derrière ses voisins courts du même chapitre. k=8 le fait entrer, et dans
 # un corpus juridique dense les articles voisins se complètent dans la réponse.
 N_CHUNKS = 8
+# Plafond GLOBAL de chunks envoyés au LLM quand une question est décomposée en
+# plusieurs sous-questions (k chacune) : sans plafond, 4 sous-questions × 8
+# chunks = 32 chunks ≈ 10 000 tokens — le contexte se noie et la facture grimpe.
+N_CHUNKS_MAX_TOTAL = 16
+# Nombre maximal de sous-questions issues de la décomposition.
+MAX_SOUS_QUESTIONS = 4
 
 # --- Chemins & noms ---
 CHROMA_PATH = PROJECT_ROOT / "chroma_db"
@@ -53,6 +59,7 @@ CHUNK_MAX_CHARS = 1500
 CORPUS_PATH = PROJECT_ROOT / "data" / "code_travail.json"
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 RAG_PROMPT_PATH = PROMPTS_DIR / "rag_system.txt"
+DECOMPOSE_PROMPT_PATH = PROMPTS_DIR / "decompose_system.txt"
 MODERATOR_PROMPT_PATH = PROMPTS_DIR / "moderator_system.txt"
 
 # --- API Légifrance (PISTE, option A du sujet) ---

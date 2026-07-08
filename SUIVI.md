@@ -16,7 +16,7 @@
 | 3 — Chunking + indexation | corpus.py, vectordb.py, index.py | `feature/vectordb` | 🔄 code écrit — indexation à exécuter |
 | 3bis — Retrieval seul | tests/eval_retrieval.py (5 questions) | `feature/vectordb` | ⏳ à exécuter |
 | — | **Tag v0.1.0 sur main** | | ⏳ |
-| 4 — Génération | prompts/rag_system.txt, rag.py (Groq, citations) | `feature/rag` | ⏳ |
+| 4 — Génération | Agent (classe mère) + RAG, prompt système, citations vérifiées | `feature/rag` | ✅ validé (3 comportements) — commits/PR à faire |
 | 5 — CLI | main.py (boucle interactive), README final | `feature/cli` | ⏳ |
 | — | **Tag v1.0.0 sur main** | | ⏳ |
 | 6 — Amélioration | recherche hybride et/ou questions datées (historique) | à définir | ⏳ |
@@ -54,6 +54,7 @@
 | **Mots collés** (« au-delàdu ») dans le texte nettoyé | Espace insécable HTML ajouté à la normalisation de `clean_text` | Relire les chunks, vraiment |
 | `\` de continuation bash collé dans PowerShell | Commandes `gh` sur une seule ligne | Deux shells, deux syntaxes |
 | `ModuleNotFoundError: src` en lançant `python tests\...py` | Toujours `python -m tests.module` depuis la racine | Le `-m` place la racine du projet dans le path |
+| **Sources vides malgré des citations correctes** (jalon 4) | gpt-oss écrit « L3121‑27 » avec un trait d'union insécable U+2011 — la regex ASCII de vérification ne matchait pas → normalisation des tirets Unicode avant extraction | Les LLM n'émettent pas de l'ASCII : normaliser avant tout motif ; et c'est le smoke test qui l'a révélé, pas la relecture du code |
 
 ## 4. Résultats mesurés
 
@@ -113,6 +114,21 @@ après toute ré-extraction du corpus. Alternatives écartées : seuil de décou
 bge-m3 (2× plus lourd pour le même problème de dilution). Re-run éval : ✅ **5/5**
 (L1235-3 au rang 8/8, distance 0.279 — marge nulle assumée et documentée).
 
+### Génération — jalon 4 (smoke test du 2026-07-08, gpt-oss-20b, temp. 0, k=8)
+
+| Comportement exigé | Résultat |
+|---|---|
+| Question dans le corpus → réponse sourcée | ✅ « 35 heures » + citation L3121-27, source vérifiée |
+| Question conditionnelle → règle + réserves | ✅ synthèse de 3 articles (L3121-20, -22, -27) avec calcul 48−35=13 h et la limite moyenne de 44 h sur 12 semaines |
+| Question hors corpus → refus | ✅ « Je ne trouve pas cette information dans ma base. » — aucune invention |
+| Avertissement juridique | ✅ 3/3 (concaténé en code) |
+| Citations vérifiées contre le contexte | ✅ 4 citations, 0 non vérifiée (après correction des tirets Unicode U+2011) |
+| Date du corpus affichée | ✅ 3/3 |
+
+Point de vigilance noté : la réponse conditionnelle ne mentionne ni le
+contingent annuel ni « sauf accord collectif » — règle 4 du prompt à durcir
+si le comportement se répète sur d'autres questions conditionnelles.
+
 ### Expériences envisagées (A/B sur le jeu d'évaluation)
 
 - ☐ e5-base vs `BAAI/bge-m3` (fenêtre 8k → plus de découpe) — seulement si un article découpé fait échouer l'éval
@@ -131,6 +147,14 @@ bge-m3 (2× plus lourd pour le même problème de dilution). Re-run éval : ✅ 
      pour que l'étape retrieval accepte une LISTE de questions (même si la v1
      n'en passe qu'une), pour brancher la décomposition sans refactor au jalon 6.
 5. ☐ Jalon 5 : `main.py` (CLI interactive, accueil « une question à la fois » en v1), README finalisé, `COMPTE_RENDU.md` → **tag v1.0.0**
+   - **RAPPEL (demande du binôme) — lien Légifrance dans les sources** :
+     afficher l'URL de chaque article cité
+     (`https://www.legifrance.gouv.fr/codes/article_lc/<LEGIARTI>`).
+     Prérequis : stocker l'identifiant `legiarti` dans `build_document()`
+     (build_corpus le possède déjà via la table des matières mais ne l'écrit
+     pas dans le JSON) → l'ajouter au schéma + aux métadonnées des chunks
+     (corpus.py) → **ré-extraction du corpus + réindexation + re-run de
+     l'éval** (attention : L1235-3 au rang 8/8, marge nulle — re-vérifier).
 6. ☐ Jalon 6 : recherche hybride (regex `L\d{4}-\d+` → lookup métadonnées), **décomposition multi-questions / mode comparaison** (cf. rappel jalon 4), et/ou questions datées sur la collection historique (+ dédoublonnage par numéro)
 
 ## 6. Pistes « avec plus de temps » (pour le compte rendu)
