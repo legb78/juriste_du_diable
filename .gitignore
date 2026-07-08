@@ -219,3 +219,7 @@ __marimo__/
 
 # Base vectorielle ChromaDB (reconstructible via python -m src.index)
 chroma_db/
+
+# Corpus extrait (non versionné : reconstructible via python -m src.build_corpus,
+# archivé sur S3 en clés datées ; voir README pour la reproduction)
+data/
