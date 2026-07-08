@@ -8,3 +8,6 @@ chromadb
 # Génération + configuration
 groq
 python-dotenv
+
+# Stockage objet AWS S3 — sauvegarde du corpus / déploiement
+boto3
