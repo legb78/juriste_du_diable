@@ -15,8 +15,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 # --- Modèles ---
-# Modèle d'embedding : multilingue, adapté au français juridique.
-EMBEDDING_MODEL = "distiluse-base-multilingual-cased-v2"
+# Modèle d'embedding : multilingue, très bon en retrieval français, assez léger
+# pour tourner sur CPU (~278M paramètres). La famille e5 est entraînée pour la
+# recherche asymétrique (question courante -> texte de loi) et EXIGE des préfixes
+# distincts pour les requêtes et les documents à l'encodage (voir vectordb.py).
+EMBEDDING_MODEL = "intfloat/multilingual-e5-base"
+E5_QUERY_PREFIX = "query: "
+E5_PASSAGE_PREFIX = "passage: "
 # LLM de génération (Groq).
 LLM_MODEL = "openai/gpt-oss-20b"
 # Modèle de modération (famille « safeguard » de Groq) — agent modérateur du jalon 6.
