@@ -44,6 +44,8 @@ MODERATOR_PROMPT_PATH = PROMPTS_DIR / "moderator_system.txt"
 # --- API Légifrance (PISTE, option A du sujet) ---
 LEGIFRANCE_TOKEN_URL = "https://oauth.piste.gouv.fr/api/oauth/token"
 LEGIFRANCE_API_URL = "https://api.piste.gouv.fr/dila/legifrance/lf-engine-app"
+# Identifiant LEGI du Code du travail (constant, publié par la DILA).
+LEGIFRANCE_CODE_TRAVAIL_ID = "LEGITEXT000006072050"
 
 # --- Thèmes du corpus (au moins 5 exigés par le sujet) ---
 # Plages d'articles indicatives du Code du travail, utilisées par build_corpus.
@@ -62,6 +64,15 @@ AVERTISSEMENT = (
     "Cet assistant ne fournit pas de conseil juridique. Consultez un avocat "
     "ou l'inspection du travail pour votre situation personnelle."
 )
+
+# --- Stockage objet AWS S3 — OPTIONNEL ---
+# Sauvegarde des instantanés du corpus et alimentation du futur déploiement.
+# Sans ces clés dans .env, src/storage.py se désactive silencieusement : le
+# pipeline local reste 100 % fonctionnel (aucun bucket requis pour corriger).
+AWS_REGION = os.getenv("AWS_REGION", "eu-west-3")  # eu-west-3 = Paris
+AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 
 # --- Secrets (chargés depuis .env, validés à l'endroit où ils servent) ---
 # GROQ_API_KEY : requis par src/rag.py (génération) uniquement.
