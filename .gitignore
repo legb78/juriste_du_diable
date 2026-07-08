@@ -156,7 +156,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-
+juriste_du_diable
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Base vectorielle ChromaDB (reconstructible via python -m src.index)
+chroma_db/
+
+# Corpus extrait (non versionné : reconstructible via python -m src.build_corpus,
+# archivé sur S3 en clés datées ; voir README pour la reproduction)
+data/
