@@ -17,11 +17,18 @@ from src.rag import RAG
 QUESTIONS = [
     ("DANS LE CORPUS", "Quelle est la durée légale de travail par semaine ?"),
     ("CONDITIONNELLE", "Combien d'heures supplémentaires peut-on faire par semaine ?"),
+    ("MULTIPLE", "Combien de jours de congés payés par an et comment fonctionne "
+                 "la rupture conventionnelle ?"),
+    ("FAMILIÈRE", "je peux me faire virer sans préavis ?"),
     ("HORS CORPUS", "Quelle est la capitale du Japon ?"),
 ]
 
 
 def afficher(resultat):
+    print("Sous-questions recherchées :")
+    for sq in resultat["sous_questions"]:
+        print(f"  · {sq}")
+    print()
     print(resultat["reponse"])
     if resultat["sources"]:
         print("\nSources :")
