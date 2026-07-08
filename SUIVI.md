@@ -74,11 +74,21 @@
 
 | Mesure | Valeur |
 |---|---|
-| Chunks collection `code_travail` (en vigueur) | _à remplir_ |
-| Chunks collection `code_travail_historique` | _à remplir_ |
+| Chunks collection `code_travail` (en vigueur) | **555** (528 articles + parties des découpés) |
+| Chunks collection `code_travail_historique` | **1 100** (1007 documents + parties) |
 | Durée du 1er encodage (CPU) | _à remplir_ |
-| Re-lancement : rechargement sans réencodage | ☐ vérifié |
-| Contrôle qualité : 3 chunks relus (aucune phrase coupée) | ☐ vérifié |
+| Re-lancement : rechargement sans réencodage | ✅ vérifié (chaque script de test recharge les collections sans réencoder) |
+| Contrôle qualité : 3 chunks relus (aucune phrase coupée) | ✅ vérifié |
+
+### Validation de la collection historique (2026-07-08)
+
+- **Isolation** : 0 version abrogée dans la collection courante ✅
+- **Versions datées** : L1235-3 → 3 rédactions (2008 / ordonnances 2017 / 2018-auj.) ✅
+- **Droit à la date D** : L1235-3 au 2017-12-01 → rédaction du 2017-09-24 ✅
+- **Numéro vacant détecté** : L3121-27 au 2010-06-15 → « aucune version valide »
+  (abrogé 2008-08-22, recréé 2016-08-10) ✅
+- Bonus : L1237-11 (rupture conventionnelle) né le 2008-06-27 — cohérent avec
+  la loi de modernisation du marché du travail ✅
 
 ### Évaluation du retrieval (à compléter après `python -m tests.eval_retrieval`)
 
@@ -100,7 +110,8 @@ courts (L1235-15, L1235-2, L1233-2...). Remède retenu : **N_CHUNKS 5 → 8**
 ~2 800 tokens, acceptable). Marge nulle (rang exactement 8) : à re-vérifier
 après toute ré-extraction du corpus. Alternatives écartées : seuil de découpe
 à 1 800 car. (grignote la fenêtre de 512 tokens sans dé-diluer le tableau),
-bge-m3 (2× plus lourd pour le même problème de dilution). Re-run éval : ☐ 5/5
+bge-m3 (2× plus lourd pour le même problème de dilution). Re-run éval : ✅ **5/5**
+(L1235-3 au rang 8/8, distance 0.279 — marge nulle assumée et documentée).
 
 ### Expériences envisagées (A/B sur le jeu d'évaluation)
 
@@ -113,8 +124,14 @@ bge-m3 (2× plus lourd pour le même problème de dilution). Re-run éval : ☐ 
 2. ☐ Exécuter l'indexation (×2 : création puis rechargement) + l'éval retrieval → remplir §4
 3. ☐ Commits + PR `feature/vectordb` → `dev` → **tag v0.1.0**
 4. ☐ Jalon 4 : prompt système (citations, refus hors corpus, conditionnels Q4/Q5) + `rag.py` (Groq temp. 0, avertissement en code, citations vérifiées contre les métadonnées)
-5. ☐ Jalon 5 : `main.py` (CLI interactive), README finalisé, `COMPTE_RENDU.md` → **tag v1.0.0**
-6. ☐ Jalon 6 : recherche hybride (regex `L\d{4}-\d+` → lookup métadonnées) et/ou questions datées sur la collection historique (+ dédoublonnage par numéro)
+   - **RAPPEL (demande du binôme)** : concevoir `rag.py` pour la **décomposition
+     multi-questions** — un input complexe/multiple est découpé en sous-questions
+     par un 1er appel LLM, **un retrieval par sous-question**, fusion des chunks
+     dédoublonnés, puis une génération unique. Au minimum : structurer le code
+     pour que l'étape retrieval accepte une LISTE de questions (même si la v1
+     n'en passe qu'une), pour brancher la décomposition sans refactor au jalon 6.
+5. ☐ Jalon 5 : `main.py` (CLI interactive, accueil « une question à la fois » en v1), README finalisé, `COMPTE_RENDU.md` → **tag v1.0.0**
+6. ☐ Jalon 6 : recherche hybride (regex `L\d{4}-\d+` → lookup métadonnées), **décomposition multi-questions / mode comparaison** (cf. rappel jalon 4), et/ou questions datées sur la collection historique (+ dédoublonnage par numéro)
 
 ## 6. Pistes « avec plus de temps » (pour le compte rendu)
 
