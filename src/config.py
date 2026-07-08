@@ -30,12 +30,26 @@ MODERATION_MODEL = "openai/gpt-oss-safeguard-20b"
 # --- Génération ---
 # Proche de zéro : on veut une restitution fidèle des articles, pas de créativité.
 LLM_TEMPERATURE = 0.0
-# Nombre de chunks récupérés et injectés dans le prompt système (à calibrer au jalon 4).
-N_CHUNKS = 5
+# Nombre de chunks récupérés et injectés dans le prompt système.
+# Calibré sur le jeu d'évaluation (2026-07-08) : avec k=5, L1235-3 (article-
+# barème au vecteur dilué par son tableau de chiffres) restait au rang 8,
+# derrière ses voisins courts du même chapitre. k=8 le fait entrer, et dans
+# un corpus juridique dense les articles voisins se complètent dans la réponse.
+N_CHUNKS = 8
 
 # --- Chemins & noms ---
 CHROMA_PATH = PROJECT_ROOT / "chroma_db"
+# Deux collections : la courante (droit en vigueur, interrogée par défaut) et
+# l'historique (toutes les versions, pour les questions datées) — l'isolation
+# garantit qu'une version abrogée ne peut JAMAIS remonter dans une réponse
+# ordinaire.
 COLLECTION_NAME = "code_travail"
+COLLECTION_HISTORIQUE = "code_travail_historique"
+
+# --- Chunking ---
+# 1 article = 1 chunk (décision Q1). Au-delà de ce seuil (~ la fenêtre de
+# 512 tokens d'e5), l'article est découpé aux frontières d'alinéas.
+CHUNK_MAX_CHARS = 1500
 CORPUS_PATH = PROJECT_ROOT / "data" / "code_travail.json"
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 RAG_PROMPT_PATH = PROMPTS_DIR / "rag_system.txt"
