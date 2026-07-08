@@ -1,0 +1,125 @@
+# Suivi du projet — Assistant Code du travail (RAG)
+
+> Journal de bord du binôme : décisions, difficultés, résultats mesurés.
+> Alimente le compte rendu final et prépare la soutenance.
+> Dernière mise à jour : 2026-07-08
+
+---
+
+## 1. État d'avancement
+
+| Jalon | Contenu | Branche | Statut |
+|---|---|---|---|
+| 0 — Bootstrap | Structure, README (Q1–Q5), .env.example, requirements | `feature/bootstrap` | ✅ mergé (PR #1) |
+| 1 — Config | Constantes de module, modèles, chemins, thèmes | `feature/config` | ✅ mergé (PR #2, #3) |
+| 2 — Corpus | Client Légifrance OAuth2, extraction historisée, S3 | `feature/corpus` | ✅ extrait (1007 docs) — PR à merger |
+| 3 — Chunking + indexation | corpus.py, vectordb.py, index.py | `feature/vectordb` | 🔄 code écrit — indexation à exécuter |
+| 3bis — Retrieval seul | tests/eval_retrieval.py (5 questions) | `feature/vectordb` | ⏳ à exécuter |
+| — | **Tag v0.1.0 sur main** | | ⏳ |
+| 4 — Génération | prompts/rag_system.txt, rag.py (Groq, citations) | `feature/rag` | ⏳ |
+| 5 — CLI | main.py (boucle interactive), README final | `feature/cli` | ⏳ |
+| — | **Tag v1.0.0 sur main** | | ⏳ |
+| 6 — Amélioration | recherche hybride et/ou questions datées (historique) | à définir | ⏳ |
+
+---
+
+## 2. Décisions de conception (et leurs justifications)
+
+| # | Décision | Justification courte |
+|---|---|---|
+| D1 | **Option A — API Légifrance** (OAuth2 client credentials, renouvellement auto du jeton à −60 s) | Valorisée au barème ; source officielle consolidée ; le client tient en ~100 lignes de `requests` |
+| D2 | **Embedding `intfloat/multilingual-e5-base`** | Entraîné pour le retrieval asymétrique (question familière → texte de loi), préfixes `query:`/`passage:` ; ~90 % de la qualité de Solon-large pour 2× moins de poids — contrainte CPU. Décision révisable sur mesure (voir §4) |
+| D3 | **LLM `openai/gpt-oss-20b`** via Groq, température 0 | Restitution fidèle du corpus, pas de créativité |
+| D4 | **Chunking : 1 article = 1 chunk**, texte embeddé enrichi `Article {n°} — {thème} ({sous-section}) : {texte}` | L'article est l'unité de citation juridique ; le numéro dans le vecteur fait matcher « que dit L3121-1 ? » ; la sous-section apporte le contexte (Ordre public / supplétif) |
+| D5 | **Articles > 1500 caractères : découpe aux frontières d'alinéas** (jamais en pleine phrase), en-tête répété, même numéro en métadonnée | Fenêtre de 512 tokens d'e5 ; ne concerne que 68 docs sur 1007 (7 %) ; pas de chevauchement — la coupe suit la structure du texte, elle n'a rien à compenser |
+| D6 | **Historisation complète des versions** depuis la recodification de 2008 | Demande explicite du binôme ; permet les questions datées (amélioration jalon 6) |
+| D7 | **Deux collections ChromaDB** : `code_travail` (en vigueur, défaut) / `code_travail_historique` (tout) | Isolation physique : une version abrogée ne peut JAMAIS remonter dans une réponse ordinaire — citer du droit mort est la faute maximale d'un assistant juridique |
+| D8 | **Nom du modèle d'embedding gravé dans les métadonnées de la collection**, relu au rechargement | Exigence du sujet ; évite d'encoder questions et documents avec deux modèles différents |
+| D9 | **Avertissement juridique concaténé EN CODE** (rag.py), jamais délégué au prompt | Absence = éliminatoire ; le code garantit 100 %, le prompt non |
+| D10 | **Corpus au format JSON** (pas CSV comme le mini-TP) | Textes multi-lignes (alinéas), booléens, dates nullables — le CSV l'encoderait mal |
+| D11 | **`data/` non versionné dans Git** | Données publiques régénérables ≠ code ; instantanés archivés sur AWS S3 en clés datées (`corpus/<date>_...` + `corpus/latest/`) |
+| D12 | **Stockage objet AWS S3 optionnel par conception** (sans clés → désactivation silencieuse) | Le correcteur doit pouvoir tout exécuter sans bucket |
+| D13 | **Thèmes ordonnés du plus spécifique au plus général** dans la config | Les plages du sujet sont imbriquées (Contrat ⊃ Licenciement ⊃ Rupture conv.) — sinon 3 sections au lieu de 5 |
+
+## 3. Difficultés rencontrées (et résolutions)
+
+| Difficulté | Résolution | Leçon |
+|---|---|---|
+| **403 sur l'API** après OAuth réussi | La souscription à l'API Légifrance (+ CGU DILA) manquait sur PISTE — le jeton se délivre même sans souscription | Tester par étages : le smoke test à 3 étages a localisé le maillon en 30 s |
+| **Commit fait directement sur `dev`** (jalon config) | `git branch feature/config` + `git reset --hard origin/dev` (commit préservé sur la branche) | Créer la branche AVANT de commiter ; les modifs non commitées suivent le checkout |
+| **Commit « corpus » à moitié vide** (le JSON n'existait pas encore) | Le run `build_corpus` n'avait jamais eu lieu ; re-commit après vrai run | Un message de commit ne vaut que si on vérifie son contenu (`git show --stat`) |
+| **Plages thématiques imbriquées** : 216 articles « Licenciement » étiquetés « Contrat de travail » | Réordonnancement des thèmes + décompte des attributions réelles | Vérifier les décomptes, pas seulement l'absence d'erreur (36+37+455 = 528 a vendu la mèche) |
+| **Historique limité à 2008** sur certains articles | Recodification de 2008 : l'ancien code (L2xx-x) est un autre texte pour Légifrance ; `articleVersions` suit une identité d'article | Limite documentée, pas un bug ; généalogie via `liens` = piste « avec plus de temps » |
+| **Numéros réattribués** : le L3121-27 de 2008 (repos compensateur) n'a rien à voir avec celui de 2016 (35 h) | Confirme le choix des deux collections : une « ancienne version » peut être une règle différente | Argument béton pour D7 en soutenance |
+| **Mots collés** (« au-delàdu ») dans le texte nettoyé | Espace insécable HTML ajouté à la normalisation de `clean_text` | Relire les chunks, vraiment |
+| `\` de continuation bash collé dans PowerShell | Commandes `gh` sur une seule ligne | Deux shells, deux syntaxes |
+| `ModuleNotFoundError: src` en lançant `python tests\...py` | Toujours `python -m tests.module` depuis la racine | Le `-m` place la racine du projet dans le path |
+
+## 4. Résultats mesurés
+
+### Corpus (extraction du 2026-07-08, option A)
+
+- **1 007 documents** = 528 articles en vigueur + 479 versions antérieures (depuis 2008)
+- 5 thèmes couverts : Rupture conventionnelle, Licenciement, Contrat de travail (CDI, CDD), Durée du travail, Congés payés
+- Longueurs des textes : **médiane 490 car.** · p95 1 638 · max 5 570 · **68 docs > 1 500 car.** (découpés aux alinéas)
+- Contrôle qualité : 10 documents relus ✅ · archivage S3 : ☐ oui ☐ non
+
+### Smoke tests API
+
+- OAuth2 : ✅ jeton 54 caractères, renouvellement à −60 s
+- Table des matières : ✅ 11 683 articles en vigueur collectés
+- Historique d'un article : ✅ L3121-27 (2 versions), L1235-3 (3 versions, ordonnances 2017 visibles)
+
+### Indexation (à compléter après `python -m src.index`)
+
+| Mesure | Valeur |
+|---|---|
+| Chunks collection `code_travail` (en vigueur) | _à remplir_ |
+| Chunks collection `code_travail_historique` | _à remplir_ |
+| Durée du 1er encodage (CPU) | _à remplir_ |
+| Re-lancement : rechargement sans réencodage | ☐ vérifié |
+| Contrôle qualité : 3 chunks relus (aucune phrase coupée) | ☐ vérifié |
+
+### Évaluation du retrieval (à compléter après `python -m tests.eval_retrieval`)
+
+| Question | Article attendu | Rang | Distance | OK ? |
+|---|---|---|---|---|
+| Durée légale de travail par semaine | L3121-27 | 1/5 | 0.232 | ✅ |
+| Congés payés acquis par mois | L3141-3 | 2/5 | 0.257 | ✅ |
+| Période d'essai maximale cadre CDI | L1221-19 | 1/5 | 0.226 | ✅ |
+| Fonctionnement rupture conventionnelle | L1237-11 | 1/5 | 0.291 | ✅ |
+| Indemnité licenciement sans cause réelle | L1235-3 *(article découpé)* | absent du top-5 | — | ❌ |
+
+**Bilan : 4/5** (run du 2026-07-08, e5-base, k=5), puis **calibration k=8**.
+Diagnostic mesuré : L1235-3 (1652 car., découpé en 2) au rang 8/20 à distance
+0.279, dans un peloton ultra-serré (top-20 entre 0.247 et 0.296, entièrement
+pertinent — que des articles indemnités/licenciement). Cause : vecteur de la
+partie 1 dilué par le tableau de chiffres du barème + concurrence des voisins
+courts (L1235-15, L1235-2, L1233-2...). Remède retenu : **N_CHUNKS 5 → 8**
+(les voisins remontés se complètent dans une réponse juridique ; coût contexte
+~2 800 tokens, acceptable). Marge nulle (rang exactement 8) : à re-vérifier
+après toute ré-extraction du corpus. Alternatives écartées : seuil de découpe
+à 1 800 car. (grignote la fenêtre de 512 tokens sans dé-diluer le tableau),
+bge-m3 (2× plus lourd pour le même problème de dilution). Re-run éval : ☐ 5/5
+
+### Expériences envisagées (A/B sur le jeu d'évaluation)
+
+- ☐ e5-base vs `BAAI/bge-m3` (fenêtre 8k → plus de découpe) — seulement si un article découpé fait échouer l'éval
+- ☐ Chevauchement d'alinéas (`chevauchement=1`) — seulement si une partie `#pN` rate sa question
+
+## 5. Reste à faire
+
+1. ☐ Merger la PR `feature/corpus` → `dev`
+2. ☐ Exécuter l'indexation (×2 : création puis rechargement) + l'éval retrieval → remplir §4
+3. ☐ Commits + PR `feature/vectordb` → `dev` → **tag v0.1.0**
+4. ☐ Jalon 4 : prompt système (citations, refus hors corpus, conditionnels Q4/Q5) + `rag.py` (Groq temp. 0, avertissement en code, citations vérifiées contre les métadonnées)
+5. ☐ Jalon 5 : `main.py` (CLI interactive), README finalisé, `COMPTE_RENDU.md` → **tag v1.0.0**
+6. ☐ Jalon 6 : recherche hybride (regex `L\d{4}-\d+` → lookup métadonnées) et/ou questions datées sur la collection historique (+ dédoublonnage par numéro)
+
+## 6. Pistes « avec plus de temps » (pour le compte rendu)
+
+- Généalogie pré-2008 des articles via le champ `liens` de l'API (l'ancien code est un autre texte)
+- Étendre aux 3 thèmes restants du sujet (SMIC, représentation du personnel, harcèlement) — ~300 articles ; le code entier (11 683) écarté pour cause de quotas PISTE (~30 000 appels)
+- Métadonnée `alineas: "4-6"` sur les parties d'articles découpés (citation à la juriste)
+- MMR (diversité sémantique du top-k) si quasi-doublons hors versions
+- Déploiement (conteneur ≥ 2 Go RAM, modèle pré-téléchargé au build, `chroma_db/` sur volume, corpus tiré de `s3://.../corpus/latest/`) + interface web
