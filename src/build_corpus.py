@@ -146,15 +146,18 @@ def main():
     walk_sections(toc, tous)
     print(f"{len(tous)} articles en vigueur trouvés dans la table des matières.")
 
-    # Filtrage par thème (plages de config.THEMES). Un dict indexé par numéro
-    # d'article évite les doublons si deux plages se chevauchent.
+    # Filtrage par thème. Les plages se chevauchent : le dict indexé par numéro
+    # garantit qu'un article n'est retenu qu'une fois, avec le PREMIER thème
+    # qui matche — config.THEMES est ordonné du plus spécifique au plus général.
+    # Le décompte affiché est celui des articles réellement attribués au thème.
     retenus = {}
     for theme, (debut, fin) in config.THEMES.items():
         n = 0
         for art in tous:
             if art["legiarti"] and art["num"] and in_range(art["num"], debut, fin):
-                retenus.setdefault(art["num"], {**art, "section": theme})
-                n += 1
+                if art["num"] not in retenus:
+                    retenus[art["num"]] = {**art, "section": theme}
+                    n += 1
         print(f"  {theme} : {n} articles")
 
     if not retenus:

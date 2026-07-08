@@ -49,12 +49,17 @@ LEGIFRANCE_CODE_TRAVAIL_ID = "LEGITEXT000006072050"
 
 # --- Thèmes du corpus (au moins 5 exigés par le sujet) ---
 # Plages d'articles indicatives du Code du travail, utilisées par build_corpus.
+# ATTENTION : les plages du sujet se chevauchent — « Contrat de travail »
+# englobe Licenciement, qui englobe Rupture conventionnelle. build_corpus
+# attribue le PREMIER thème qui matche : l'ordre ci-dessous va donc du plus
+# spécifique au plus général, pour que chaque article porte le thème le plus
+# précis (sinon tout finirait étiqueté « Contrat de travail »).
 THEMES = {
+    "Rupture conventionnelle": ("L1237-11", "L1237-19"),
+    "Licenciement": ("L1231-1", "L1237-20"),
+    "Contrat de travail (CDI, CDD)": ("L1221-1", "L1248-11"),
     "Durée du travail et heures supplémentaires": ("L3121-1", "L3121-36"),
     "Congés payés": ("L3141-1", "L3141-32"),
-    "Contrat de travail (CDI, CDD)": ("L1221-1", "L1248-11"),
-    "Licenciement": ("L1231-1", "L1237-20"),
-    "Rupture conventionnelle": ("L1237-11", "L1237-19"),
 }
 
 # --- Avertissement juridique ---
