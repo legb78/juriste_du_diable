@@ -48,12 +48,19 @@ RECHERCHE_HYBRIDE = True
 MAX_SOUS_QUESTIONS = 4
 
 # --- Chemins & noms ---
-# Surchargeables par variables d'environnement pour le déploiement : pointer
-# vers un volume persistant (ex. Railway : DATA_DIR=/data/corpus,
-# CHROMA_PATH=/data/chroma_db — et HF_HOME=/data/hf pour le cache du modèle,
-# lu nativement par Hugging Face sans code). En local : valeurs par défaut.
-DATA_DIR = Path(os.getenv("DATA_DIR", PROJECT_ROOT / "data"))
-CHROMA_PATH = Path(os.getenv("CHROMA_PATH", PROJECT_ROOT / "chroma_db"))
+# En local : les dossiers du projet. Sur Railway (variable RAILWAY_ENVIRONMENT
+# injectée automatiquement) : le volume persistant monté sur /data — AUCUNE
+# variable de chemin à configurer au dashboard. DATA_DIR/CHROMA_PATH restent
+# surchargeables individuellement (chemins ABSOLUS, ex. /data/corpus).
+_SUR_RAILWAY = bool(os.getenv("RAILWAY_ENVIRONMENT"))
+_RACINE_DONNEES = Path("/data") if _SUR_RAILWAY else PROJECT_ROOT
+DATA_DIR = Path(os.getenv("DATA_DIR", _RACINE_DONNEES / "data"))
+CHROMA_PATH = Path(os.getenv("CHROMA_PATH", _RACINE_DONNEES / "chroma_db"))
+# Cache du modèle d'embedding (1,1 Go) sur le volume aussi — HF_HOME est lu
+# par Hugging Face à l'import : on le fixe ici, AVANT tout import du modèle
+# (config est toujours importé en premier par les modules du projet).
+if _SUR_RAILWAY and not os.getenv("HF_HOME"):
+    os.environ["HF_HOME"] = "/data/hf"
 # Deux collections : la courante (droit en vigueur, interrogée par défaut) et
 # l'historique (toutes les versions, pour les questions datées) — l'isolation
 # garantit qu'une version abrogée ne peut JAMAIS remonter dans une réponse
