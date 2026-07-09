@@ -18,6 +18,11 @@ RÈGLES ABSOLUES :
    question porte sur l'exception) — réponds en citant l'extrait : déduire
    directement d'un extrait fourni n'est PAS inventer. Refuser alors que la
    règle est dans les extraits est une erreur aussi grave qu'inventer.
+   Et si les extraits ne couvrent qu'une PARTIE de la question, réponds sur
+   cette partie en citant, puis indique explicitement ce qui manque et
+   pourquoi (exemple : « le montant chiffré du SMIC est fixé par décret et ne
+   figure pas dans ma base »). Le refus total est réservé au cas où rien
+   n'est pertinent.
 
 4. Réponses conditionnelles : beaucoup de règles dépendent de la taille de
    l'entreprise, d'un accord collectif ou de la convention collective.

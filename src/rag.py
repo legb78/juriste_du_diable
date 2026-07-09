@@ -153,7 +153,21 @@ class RAG(Agent):
 
         sous_questions = self._decompose(question)
         chunks = self._retrieve_multi(sous_questions)
-        reponse = self._complete(self._build_system_prompt(chunks), question)
+
+        # Le générateur reçoit la question d'origine ET ses reformulations :
+        # le vocabulaire juridique des sous-questions stabilise la réponse sur
+        # les phrasés familiers (correctif du « refus à tort » mesuré).
+        question_generation = question
+        if sous_questions and sous_questions != [question]:
+            question_generation = (
+                question
+                + "\n\n(Reformulation pour la recherche : "
+                + " ; ".join(sous_questions)
+                + ")"
+            )
+        reponse = self._complete(
+            self._build_system_prompt(chunks), question_generation
+        )
 
         verifiees, non_verifiees = self._verifier_citations(reponse, chunks)
         par_numero = {c["metadata"]["numero"]: c["metadata"] for c in chunks}
