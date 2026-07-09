@@ -40,7 +40,7 @@ URL_LEGIDATA = (
     "https://raw.githubusercontent.com/SocialGouv/legi-data/"
     "master/data/LEGITEXT000006072050.json"
 )
-CACHE_LEGIDATA = config.PROJECT_ROOT / "data" / "legidata_code_travail.json"
+CACHE_LEGIDATA = config.DATA_DIR / "legidata_code_travail.json"
 
 
 def charger_dump():
