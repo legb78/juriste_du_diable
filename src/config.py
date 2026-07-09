@@ -30,6 +30,10 @@ MODERATION_MODEL = "openai/gpt-oss-safeguard-20b"
 # --- Génération ---
 # Proche de zéro : on veut une restitution fidèle des articles, pas de créativité.
 LLM_TEMPERATURE = 0.0
+# Plafond de tokens de SORTIE : sans lui, Groq applique un défaut trop court
+# et les réponses multi-volets sont tronquées en plein mot (constaté en prod
+# sur une question à 3 sous-questions).
+LLM_MAX_TOKENS = 2048
 # Nombre de chunks récupérés et injectés dans le prompt système.
 # Calibré sur le jeu d'évaluation (2026-07-08) : avec k=5, L1235-3 (article-
 # barème au vecteur dilué par son tableau de chiffres) restait au rang 8,
