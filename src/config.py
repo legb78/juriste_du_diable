@@ -48,7 +48,12 @@ RECHERCHE_HYBRIDE = True
 MAX_SOUS_QUESTIONS = 4
 
 # --- Chemins & noms ---
-CHROMA_PATH = PROJECT_ROOT / "chroma_db"
+# Surchargeables par variables d'environnement pour le déploiement : pointer
+# vers un volume persistant (ex. Railway : DATA_DIR=/data/corpus,
+# CHROMA_PATH=/data/chroma_db — et HF_HOME=/data/hf pour le cache du modèle,
+# lu nativement par Hugging Face sans code). En local : valeurs par défaut.
+DATA_DIR = Path(os.getenv("DATA_DIR", PROJECT_ROOT / "data"))
+CHROMA_PATH = Path(os.getenv("CHROMA_PATH", PROJECT_ROOT / "chroma_db"))
 # Deux collections : la courante (droit en vigueur, interrogée par défaut) et
 # l'historique (toutes les versions, pour les questions datées) — l'isolation
 # garantit qu'une version abrogée ne peut JAMAIS remonter dans une réponse
@@ -60,7 +65,7 @@ COLLECTION_HISTORIQUE = "code_travail_historique"
 # 1 article = 1 chunk (décision Q1). Au-delà de ce seuil (~ la fenêtre de
 # 512 tokens d'e5), l'article est découpé aux frontières d'alinéas.
 CHUNK_MAX_CHARS = 1500
-CORPUS_PATH = PROJECT_ROOT / "data" / "code_travail.json"
+CORPUS_PATH = DATA_DIR / "code_travail.json"
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 RAG_PROMPT_PATH = PROMPTS_DIR / "rag_system.txt"
 DECOMPOSE_PROMPT_PATH = PROMPTS_DIR / "decompose_system.txt"
@@ -88,8 +93,8 @@ HISTORIQUE_A_LA_VOLEE = True
 # (mode alternatif conservé : False ci-dessus + True ci-dessous = tout
 # pré-télécharger et indexer, l'ancienne logique)
 HISTORISATION_COMPLETE = False
-VERSIONS_MAP_PATH = PROJECT_ROOT / "data" / "versions_map.json"
-CACHE_VERSIONS_DIR = PROJECT_ROOT / "data" / "cache_versions"
+VERSIONS_MAP_PATH = DATA_DIR / "versions_map.json"
+CACHE_VERSIONS_DIR = DATA_DIR / "cache_versions"
 
 # --- Thèmes du corpus (au moins 5 exigés par le sujet) ---
 # Plages d'articles indicatives du Code du travail, utilisées par build_corpus.
