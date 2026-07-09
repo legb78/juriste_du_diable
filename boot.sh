@@ -1,22 +1,16 @@
 #!/bin/sh
-# Démarrage du service (Railway) : auto-initialisation idempotente.
+# Démarrage du service (Railway) : mise à jour conditionnelle puis serveur.
 #
-# - boot ordinaire (volume déjà initialisé) : la base se RECHARGE sans
-#   réencodage (~30 s), puis le serveur démarre ;
-# - premier boot (volume vierge) : construction du corpus depuis le dump
-#   public legi-data (~2-3 min) puis indexation (~20-25 min d'encodage CPU),
-#   PUIS le serveur — d'où le healthcheck patient de railway.json.
+# src/maj.py décide seul :
+# - source inchangée + base présente -> rien (boot total ~30-60 s) ;
+# - premier boot ou source modifiée  -> reconstruction complète (~25 min,
+#   couverte par le healthcheck patient de railway.json).
 #
-# Aucun secret d'extraction requis : le dump GitHub est public. Seule
-# GROQ_API_KEY est nécessaire (génération).
+# Le cron quotidien (GitHub Actions) se contente de redéployer le service :
+# c'est CE script qui garantit « pas de rebuild si rien n'a changé ».
 set -e
 
-echo "[boot] Tentative de rechargement de la base existante..."
-if ! python -m src.index; then
-    echo "[boot] Base ou corpus absents : initialisation (premier boot)."
-    python -m src.build_corpus_legidata
-    python -m src.index
-fi
+python -m src.maj
 
 echo "[boot] Base prête — démarrage du serveur."
 exec uvicorn src.api:app --host 0.0.0.0 --port "${PORT:-8000}"
