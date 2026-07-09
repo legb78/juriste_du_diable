@@ -14,3 +14,7 @@ python-dotenv
 
 # Stockage objet AWS S3 — sauvegarde du corpus / déploiement
 boto3
+
+# Interface web
+fastapi
+uvicorn[standard]

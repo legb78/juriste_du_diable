@@ -162,6 +162,9 @@ class RAG(Agent):
                 "numero": numero,
                 "section": par_numero[numero]["section"],
                 "version_depuis": par_numero[numero]["version_depuis"],
+                # Identifiant Légifrance -> lien vers le texte officiel :
+                # https://www.legifrance.gouv.fr/codes/article_lc/<legiarti>
+                "legiarti": par_numero[numero].get("legiarti", ""),
             }
             for numero in verifiees
         ]
