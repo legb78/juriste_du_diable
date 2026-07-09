@@ -6,7 +6,7 @@
   "deploy": {
     "startCommand": "sh boot.sh",
     "healthcheckPath": "/",
-    "healthcheckTimeout": 1800,
+    "healthcheckTimeout": 24000,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
   }
