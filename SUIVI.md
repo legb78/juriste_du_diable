@@ -18,7 +18,8 @@
 | — | **Tag v0.1.0 sur main** | | ⏳ |
 | 4 — Génération | Agent (classe mère) + RAG, prompt système, citations vérifiées, décomposition | `feature/rag` | ✅ 8 commits — PR vers dev à merger |
 | 6a — Modérateur | Moderator(Agent), modèle safeguard, étape 0 du pipeline | `feature/moderator` | ✅ 4 commits, injection bloquée au smoke test — PR à faire |
-| 5 — CLI | main.py (boucle interactive), README final | `feature/cli` | ⏳ |
+| UI web (hors barème) | FastAPI + page chat : sources cliquables Légifrance (legiarti), historique visuel localStorage, avertissement double (par réponse + bandeau), refus de démarrer sans base | `feature/web-ui` | ✅ validée en local — PR à faire |
+| 5 — CLI | main.py (boucle interactive), README final, COMPTE_RENDU | `feature/cli` | ⏳ **exigée au barème — prochaine priorité** |
 | — | **Tag v1.0.0 sur main** | | ⏳ |
 | 6 — Amélioration | recherche hybride et/ou questions datées (historique) | à définir | ⏳ |
 
@@ -192,6 +193,16 @@ préavis ? » → zéro citation, diagnostic en cours) · fidélité **8/9** (en
 HAUSSE : la base élargie contient les articles que les renvois citaient) ·
 garanties **15/15**. Bonus : les articles réglementaires (D3121-25...)
 enrichissent les réponses.
+
+**DOSSIER OUVERT — refus à tort sur la question familière** : diagnostic en
+3 sondes : reformulation ✅ (« Un employeur peut-il licencier sans respecter
+de préavis ? ») → retrieval ✅ (L1234-1 au RANG 1) → le LLM refuse quand même.
+Correctif règle 3 du prompt (déduire ≠ inventer) : INSUFFISANT (re-testé,
+refus persistant ; refus légitimes Japon/TVA intacts). Prochaine hypothèse :
+le générateur reçoit la question d'origine familière — tester la version
+reformulée en direct ; si elle passe → donner les sous-questions reformulées
+au générateur ; sinon → gpt-oss-20b trop timide sur ce pattern (température,
+ou modèle). État accepté temporairement : 8/9 documenté.
 
 ### Expériences envisagées (A/B sur le jeu d'évaluation)
 
