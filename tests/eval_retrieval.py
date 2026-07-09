@@ -25,26 +25,39 @@ QUESTIONS = [
 ]
 
 
-def main():
-    db = VectorDB(config, config.COLLECTION_NAME)  # recharge ; erreur si absente
+# Le cas que seul le lexical garantit : la question par numéro d'article.
+QUESTION_LEXICALE = ("Que dit l'article L3121-1 ?", "L3121-1")
 
+
+def evaluer(nom_mode, retriever):
+    """Passe le jeu de questions (+ le cas lexical) dans un mode de recherche."""
+    print(f"\n=== Mode {nom_mode} ===")
     reussites = 0
-    for question, attendu in QUESTIONS:
-        chunks = db.retrieve(question)
+    cas = QUESTIONS + [QUESTION_LEXICALE]
+    for question, attendu in cas:
+        chunks = retriever(question)
         numeros = [c["metadata"]["numero"] for c in chunks]
         if attendu in numeros:
             rang = numeros.index(attendu) + 1
-            distance = chunks[rang - 1]["distance"]
-            print(f"OK  {attendu} au rang {rang}/{len(chunks)} "
-                  f"(distance {distance:.3f}) — {question}")
+            print(f"OK  {attendu} au rang {rang}/{len(chunks)} — {question}")
             reussites += 1
         else:
             print(f"ÉCHEC  {attendu} absent du top-{len(chunks)} — {question}")
             print(f"       remontés : {numeros}")
+    print(f"Bilan {nom_mode} : {reussites}/{len(cas)}")
+    return reussites, len(cas)
 
-    print(f"\nBilan : {reussites}/{len(QUESTIONS)} articles attendus dans le top-k")
-    if reussites < len(QUESTIONS):
-        sys.exit(1)
+
+def main():
+    db = VectorDB(config, config.COLLECTION_NAME)  # recharge ; erreur si absente
+
+    # A/B : le vectoriel pur (ligne de base) contre l'hybride (mode de prod).
+    evaluer("vectoriel", db.retrieve)
+    reussites, total = evaluer("hybride (BM25 + RRF + garantie numéros)",
+                               db.retrieve_hybride)
+
+    if reussites < total:
+        sys.exit(1)  # le mode de production doit être parfait
 
 
 if __name__ == "__main__":

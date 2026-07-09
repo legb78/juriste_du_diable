@@ -84,6 +84,9 @@ class Corpus:
                     # absentes deviennent des chaînes vides.
                     "metadata": {
                         "numero": doc["numero"],
+                        # Identifiant Légifrance de la version : permet le lien
+                        # https://www.legifrance.gouv.fr/codes/article_lc/<id>
+                        "legiarti": doc.get("legiarti", ""),
                         "section": doc["section"],
                         "titre": doc["titre"],
                         "source": doc["source"],

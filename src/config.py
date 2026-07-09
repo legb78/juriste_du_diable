@@ -30,15 +30,43 @@ MODERATION_MODEL = "openai/gpt-oss-safeguard-20b"
 # --- Génération ---
 # Proche de zéro : on veut une restitution fidèle des articles, pas de créativité.
 LLM_TEMPERATURE = 0.0
+# Plafond de tokens de SORTIE : sans lui, Groq applique un défaut trop court
+# et les réponses multi-volets sont tronquées en plein mot (constaté en prod
+# sur une question à 3 sous-questions).
+LLM_MAX_TOKENS = 2048
 # Nombre de chunks récupérés et injectés dans le prompt système.
 # Calibré sur le jeu d'évaluation (2026-07-08) : avec k=5, L1235-3 (article-
 # barème au vecteur dilué par son tableau de chiffres) restait au rang 8,
 # derrière ses voisins courts du même chapitre. k=8 le fait entrer, et dans
 # un corpus juridique dense les articles voisins se complètent dans la réponse.
 N_CHUNKS = 8
+# Plafond GLOBAL de chunks envoyés au LLM quand une question est décomposée en
+# plusieurs sous-questions (k chacune) : sans plafond, 4 sous-questions × 8
+# chunks = 32 chunks ≈ 10 000 tokens — le contexte se noie et la facture grimpe.
+N_CHUNKS_MAX_TOTAL = 16
+# Recherche hybride : fusion RRF du classement vectoriel et du classement
+# lexical BM25 + garantie sur les numéros d'articles cités dans la question.
+# Drapeau pour l'A/B : False = vectoriel pur (ligne de base).
+RECHERCHE_HYBRIDE = True
+# Nombre maximal de sous-questions issues de la décomposition.
+MAX_SOUS_QUESTIONS = 4
 
 # --- Chemins & noms ---
-CHROMA_PATH = PROJECT_ROOT / "chroma_db"
+# En local : les dossiers du projet. Sur Railway (variable RAILWAY_ENVIRONMENT
+# injectée automatiquement) : le volume persistant monté sur /data — AUCUNE
+# variable de chemin à configurer au dashboard. DATA_DIR/CHROMA_PATH restent
+# surchargeables individuellement (chemins ABSOLUS, ex. /data/corpus).
+_SUR_RAILWAY = bool(os.getenv("RAILWAY_ENVIRONMENT"))
+# Racine des données : le dossier du projet en local, le volume /data sur
+# Railway. C'est aussi le point d'extraction des archives de base (storage).
+RACINE_DONNEES = Path("/data") if _SUR_RAILWAY else PROJECT_ROOT
+DATA_DIR = Path(os.getenv("DATA_DIR", RACINE_DONNEES / "data"))
+CHROMA_PATH = Path(os.getenv("CHROMA_PATH", RACINE_DONNEES / "chroma_db"))
+# Cache du modèle d'embedding (1,1 Go) sur le volume aussi — HF_HOME est lu
+# par Hugging Face à l'import : on le fixe ici, AVANT tout import du modèle
+# (config est toujours importé en premier par les modules du projet).
+if _SUR_RAILWAY and not os.getenv("HF_HOME"):
+    os.environ["HF_HOME"] = "/data/hf"
 # Deux collections : la courante (droit en vigueur, interrogée par défaut) et
 # l'historique (toutes les versions, pour les questions datées) — l'isolation
 # garantit qu'une version abrogée ne peut JAMAIS remonter dans une réponse
@@ -50,9 +78,10 @@ COLLECTION_HISTORIQUE = "code_travail_historique"
 # 1 article = 1 chunk (décision Q1). Au-delà de ce seuil (~ la fenêtre de
 # 512 tokens d'e5), l'article est découpé aux frontières d'alinéas.
 CHUNK_MAX_CHARS = 1500
-CORPUS_PATH = PROJECT_ROOT / "data" / "code_travail.json"
+CORPUS_PATH = DATA_DIR / "code_travail.json"
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 RAG_PROMPT_PATH = PROMPTS_DIR / "rag_system.txt"
+DECOMPOSE_PROMPT_PATH = PROMPTS_DIR / "decompose_system.txt"
 MODERATOR_PROMPT_PATH = PROMPTS_DIR / "moderator_system.txt"
 
 # --- API Légifrance (PISTE, option A du sujet) ---
@@ -60,6 +89,25 @@ LEGIFRANCE_TOKEN_URL = "https://oauth.piste.gouv.fr/api/oauth/token"
 LEGIFRANCE_API_URL = "https://api.piste.gouv.fr/dila/legifrance/lf-engine-app"
 # Identifiant LEGI du Code du travail (constant, publié par la DILA).
 LEGIFRANCE_CODE_TRAVAIL_ID = "LEGITEXT000006072050"
+
+# --- Étendue du corpus ---
+# True : TOUT le Code du travail (≈ 11 700 articles) — les articles des 5
+# thèmes gardent leur historisation complète ; les autres n'embarquent que
+# leur version en vigueur (l'historisation intégrale ferait ~30 000 appels
+# API, incompatible avec les quotas PISTE). False : les 5 thèmes seulement.
+CORPUS_COMPLET = True
+# Historique « À LA VOLÉE » (décision 2026-07-09) : le corpus indexé ne
+# contient QUE les versions courantes (dump legi-data, nettoyées). La carte
+# des versions de chaque article (ids + dates, extraite du dump) est écrite
+# dans VERSIONS_MAP_PATH ; le TEXTE d'une ancienne version n'est récupéré via
+# l'API Légifrance qu'au moment où une question datée le demande
+# (src/histoire.py), avec cache disque. Zéro pré-téléchargement massif.
+HISTORIQUE_A_LA_VOLEE = True
+# (mode alternatif conservé : False ci-dessus + True ci-dessous = tout
+# pré-télécharger et indexer, l'ancienne logique)
+HISTORISATION_COMPLETE = False
+VERSIONS_MAP_PATH = DATA_DIR / "versions_map.json"
+CACHE_VERSIONS_DIR = DATA_DIR / "cache_versions"
 
 # --- Thèmes du corpus (au moins 5 exigés par le sujet) ---
 # Plages d'articles indicatives du Code du travail, utilisées par build_corpus.

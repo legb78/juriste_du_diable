@@ -1,0 +1,198 @@
+"""L'assistant RAG — l'agent qui répond aux questions avec citations.
+
+Hérite d'Agent (client Groq, prompt, _complete) et orchestre le pipeline :
+
+    question
+      -> _decompose        v1 : passe-plat [question] ; jalon 6 : un appel LLM
+                           découpera les questions multiples/complexes
+      -> _retrieve_multi   UN retrieval PAR sous-question, fusion dédoublonnée
+      -> _build_system_prompt   contexte numéroté + métadonnées + date corpus
+      -> _complete         l'appel Groq (température 0)
+      -> post-traitement EN CODE :
+           - citations vérifiées contre les métadonnées des chunks fournis
+             (le LLM propose, le code contrôle — un numéro absent du contexte
+             est signalé comme non vérifié) ;
+           - avertissement juridique TOUJOURS concaténé ici : sa présence ne
+             dépend jamais de l'obéissance du LLM (exigence éliminatoire).
+
+Le constructeur RECHARGE la base existante et ne réindexe jamais : si elle
+n'existe pas, l'erreur invite à lancer python -m src.index.
+"""
+
+import re
+
+from src import config
+from src.agent import Agent
+from src.moderator import Moderator
+from src.vectordb import VectorDB
+
+# Motif d'un numéro d'article de la partie législative (tolère « L. 3121-27 »).
+MOTIF_ARTICLE = re.compile(r"[LRD]\.?\s?\d{4}(?:-\d+)+")
+
+# Message renvoyé quand le modérateur bloque une tentative de détournement.
+REFUS_INJECTION = (
+    "Votre demande a été identifiée comme une tentative de détournement du "
+    "système et ne peut pas être traitée."
+)
+
+
+class RAG(Agent):
+    """Orchestre retrieval, génération et garanties de traçabilité."""
+
+    def __init__(self):
+        super().__init__(
+            config.RAG_PROMPT_PATH, config.LLM_MODEL, config.LLM_TEMPERATURE
+        )
+        # Recharge la collection courante (droit en vigueur uniquement).
+        self.db = VectorDB(config, config.COLLECTION_NAME)
+        # Prompt de l'étage de décomposition (second rôle du même agent).
+        with open(config.DECOMPOSE_PROMPT_PATH, encoding="utf-8") as f:
+            self.decompose_prompt = f.read()
+        # Le vigile : modération AVANT tout appel au LLM principal.
+        self.moderator = Moderator()
+
+    # ------------------------------------------------------------------ #
+    # 1. Décomposition                                                    #
+    # ------------------------------------------------------------------ #
+    def _decompose(self, question):
+        """Découpe le message en 1 à MAX_SOUS_QUESTIONS sous-questions de
+        recherche autonomes, reformulées en vocabulaire juridique (un appel
+        LLM court, température 0 — améliorations « reformulation » et
+        « questions multiples » du jalon 6).
+
+        Filet de sécurité : si l'appel échoue ou renvoie du vide, la question
+        d'origine part telle quelle en recherche — la décomposition ne doit
+        jamais pouvoir casser le pipeline.
+        """
+        try:
+            brut = self._complete(self.decompose_prompt, question)
+        except Exception:
+            return [question]
+        sous_questions = [
+            ligne.strip(" -•*\t") for ligne in brut.splitlines() if ligne.strip()
+        ]
+        return sous_questions[: config.MAX_SOUS_QUESTIONS] or [question]
+
+    # ------------------------------------------------------------------ #
+    # 2. Retrieval (un par sous-question, fusion dédoublonnée)            #
+    # ------------------------------------------------------------------ #
+    def _retrieve_multi(self, questions):
+        """Un retrieve PAR sous-question ; fusion dédoublonnée par chunk
+        (clé numéro + partie), la meilleure distance gagne ; tri global."""
+        recherche = (
+            self.db.retrieve_hybride if config.RECHERCHE_HYBRIDE else self.db.retrieve
+        )
+        vus = {}
+        for question in questions:
+            for chunk in recherche(question):
+                cle = (chunk["metadata"]["numero"], chunk["metadata"]["partie"])
+                if cle not in vus or chunk["distance"] < vus[cle]["distance"]:
+                    vus[cle] = chunk
+        chunks = sorted(vus.values(), key=lambda c: c["distance"])
+        # Garde-fou : k par sous-question, plafonné globalement pour que le
+        # contexte du LLM ne se noie pas (cf. config.N_CHUNKS_MAX_TOTAL).
+        plafond = min(config.N_CHUNKS * len(questions), config.N_CHUNKS_MAX_TOTAL)
+        return chunks[:plafond]
+
+    # ------------------------------------------------------------------ #
+    # 3. Prompt système                                                   #
+    # ------------------------------------------------------------------ #
+    def _build_system_prompt(self, chunks):
+        """Remplit {{Chunks}} (contexte numéroté) et {{DateCorpus}}."""
+        lignes = []
+        for i, chunk in enumerate(chunks, 1):
+            meta = chunk["metadata"]
+            depuis = meta["version_depuis"] or "?"
+            lignes.append(
+                f"[{i}] (rédaction en vigueur depuis le {depuis})\n{chunk['text']}"
+            )
+        date_corpus = chunks[0]["metadata"]["date_extraction"] if chunks else "inconnue"
+        prompt = self.system_prompt_template.replace("{{Chunks}}", "\n\n".join(lignes))
+        return prompt.replace("{{DateCorpus}}", date_corpus)
+
+    # ------------------------------------------------------------------ #
+    # 4. Vérification des citations (le LLM propose, le code contrôle)    #
+    # ------------------------------------------------------------------ #
+    def _verifier_citations(self, reponse, chunks):
+        """Sépare les numéros cités en (vérifiés, non vérifiés).
+
+        Vérifié = présent dans les métadonnées des chunks fournis au LLM.
+        Un numéro « non vérifié » est le symptôme d'une hallucination.
+        """
+        fournis = {c["metadata"]["numero"] for c in chunks}
+        # Les LLM émettent souvent des tirets Unicode (insécable U+2011,
+        # demi-cadratin U+2013...) : on les normalise en tiret ASCII avant le
+        # motif, sinon « L3121‑27 » échappe à la vérification.
+        texte = re.sub(r"[‐‑‒–—−]", "-", reponse)
+        cites = {
+            re.sub(r"[.\s]", "", m.group(0)) for m in MOTIF_ARTICLE.finditer(texte)
+        }
+        return sorted(cites & fournis), sorted(cites - fournis)
+
+    # ------------------------------------------------------------------ #
+    # Pipeline complet                                                    #
+    # ------------------------------------------------------------------ #
+    def answer_question(self, question):
+        """Renvoie un dict structuré ; l'affichage est l'affaire de main.py.
+
+        Clés : reponse, sources (articles cités ET vérifiés, avec leurs
+        métadonnées), citations_non_verifiees, date_corpus, avertissement.
+        """
+        # 0. Modération AVANT tout : un message bloqué n'atteint jamais le
+        # décomposeur ni le générateur (décision de sécurité, cf. mini-TP).
+        verdict = self.moderator.moderate(question)
+        if verdict["is_prompt_injection"]:
+            return {
+                "reponse": REFUS_INJECTION,
+                "sous_questions": [],
+                "sources": [],
+                "citations_non_verifiees": [],
+                "date_corpus": "—",
+                "avertissement": config.AVERTISSEMENT,
+            }
+
+        sous_questions = self._decompose(question)
+        chunks = self._retrieve_multi(sous_questions)
+
+        # Le générateur reçoit la question d'origine ET ses reformulations :
+        # le vocabulaire juridique des sous-questions stabilise la réponse sur
+        # les phrasés familiers (correctif du « refus à tort » mesuré).
+        question_generation = question
+        if sous_questions and sous_questions != [question]:
+            question_generation = (
+                question
+                + "\n\n(Reformulation pour la recherche : "
+                + " ; ".join(sous_questions)
+                + ")"
+            )
+        reponse = self._complete(
+            self._build_system_prompt(chunks), question_generation
+        )
+
+        verifiees, non_verifiees = self._verifier_citations(reponse, chunks)
+        par_numero = {c["metadata"]["numero"]: c["metadata"] for c in chunks}
+        sources = [
+            {
+                "numero": numero,
+                "section": par_numero[numero]["section"],
+                "version_depuis": par_numero[numero]["version_depuis"],
+                # Identifiant Légifrance -> lien vers le texte officiel :
+                # https://www.legifrance.gouv.fr/codes/article_lc/<legiarti>
+                "legiarti": par_numero[numero].get("legiarti", ""),
+            }
+            for numero in verifiees
+        ]
+
+        return {
+            "reponse": reponse,
+            # Observabilité : les sous-questions réellement recherchées sont
+            # exposées — l'utilisateur (et le smoke test) VOIT la décomposition.
+            "sous_questions": sous_questions,
+            "sources": sources,
+            "citations_non_verifiees": non_verifiees,
+            "date_corpus": chunks[0]["metadata"]["date_extraction"]
+            if chunks
+            else "inconnue",
+            # Concaténé ICI, en code : jamais délégué au LLM (éliminatoire).
+            "avertissement": config.AVERTISSEMENT,
+        }

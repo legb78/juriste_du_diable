@@ -16,8 +16,10 @@
 | 3 — Chunking + indexation | corpus.py, vectordb.py, index.py | `feature/vectordb` | 🔄 code écrit — indexation à exécuter |
 | 3bis — Retrieval seul | tests/eval_retrieval.py (5 questions) | `feature/vectordb` | ⏳ à exécuter |
 | — | **Tag v0.1.0 sur main** | | ⏳ |
-| 4 — Génération | prompts/rag_system.txt, rag.py (Groq, citations) | `feature/rag` | ⏳ |
-| 5 — CLI | main.py (boucle interactive), README final | `feature/cli` | ⏳ |
+| 4 — Génération | Agent (classe mère) + RAG, prompt système, citations vérifiées, décomposition | `feature/rag` | ✅ 8 commits — PR vers dev à merger |
+| 6a — Modérateur | Moderator(Agent), modèle safeguard, étape 0 du pipeline | `feature/moderator` | ✅ 4 commits, injection bloquée au smoke test — PR à faire |
+| UI web (hors barème) | FastAPI + page chat : sources cliquables Légifrance (legiarti), historique visuel localStorage, avertissement double (par réponse + bandeau), refus de démarrer sans base | `feature/web-ui` | ✅ validée en local — PR à faire |
+| 5 — CLI | main.py (boucle interactive), README final, COMPTE_RENDU | `feature/cli` | ⏳ **exigée au barème — prochaine priorité** |
 | — | **Tag v1.0.0 sur main** | | ⏳ |
 | 6 — Amélioration | recherche hybride et/ou questions datées (historique) | à définir | ⏳ |
 
@@ -40,6 +42,8 @@
 | D11 | **`data/` non versionné dans Git** | Données publiques régénérables ≠ code ; instantanés archivés sur AWS S3 en clés datées (`corpus/<date>_...` + `corpus/latest/`) |
 | D12 | **Stockage objet AWS S3 optionnel par conception** (sans clés → désactivation silencieuse) | Le correcteur doit pouvoir tout exécuter sans bucket |
 | D13 | **Thèmes ordonnés du plus spécifique au plus général** dans la config | Les plages du sujet sont imbriquées (Contrat ⊃ Licenciement ⊃ Rupture conv.) — sinon 3 sections au lieu de 5 |
+| D15 | **Architecture finale du corpus : dump + historique À LA VOLÉE** (2026-07-09, décision finale après 3 itérations) : indexé = versions courantes du dump legi-data (nettoyées, 0 appel API) ; carte des versions de TOUS les articles (ids+dates, du dump) dans `versions_map.json` ; TEXTE d'une ancienne version récupéré par l'API seulement quand une question datée le demande (`src/histoire.py`, cache disque) | Vérifié sur les données : legi-data a la carte des versions mais PAS leurs textes. Le pré-téléchargement intégral (10 256 appels, ~2 h, run annulé) ne servait qu'aux questions datées — le lazy le remplace à 0-3 appels par question. Uniforme (tous les articles égaux), frais (dump quotidien), quotas préservés. Contrepartie : les questions datées exigent réseau + identifiants. Modes bulk conservés (build_corpus.py tout-API ; flags config) |
+| D14 | **HyDE écarté** (après étude) | Redondant dans notre architecture : (1) la décomposition-reformulation traduit déjà le langage familier en vocabulaire juridique ; (2) e5 est entraîné pour l'asymétrie question→document (préfixes query/passage) — HyDE vise les embedders symétriques ; (3) le canal lexical BM25 de l'hybride couvre le matching de vocabulaire exact ; (4) coût +1 appel LLM/sous-question sur un quota de 8 000 TPM, et risque de dérive quand l'hypothèse « brode ». Réversible : A/B possible contre la ligne de base si l'éval révélait un déficit sur les questions très courtes |
 
 ## 3. Difficultés rencontrées (et résolutions)
 
@@ -54,6 +58,7 @@
 | **Mots collés** (« au-delàdu ») dans le texte nettoyé | Espace insécable HTML ajouté à la normalisation de `clean_text` | Relire les chunks, vraiment |
 | `\` de continuation bash collé dans PowerShell | Commandes `gh` sur une seule ligne | Deux shells, deux syntaxes |
 | `ModuleNotFoundError: src` en lançant `python tests\...py` | Toujours `python -m tests.module` depuis la racine | Le `-m` place la racine du projet dans le path |
+| **Sources vides malgré des citations correctes** (jalon 4) | gpt-oss écrit « L3121‑27 » avec un trait d'union insécable U+2011 — la regex ASCII de vérification ne matchait pas → normalisation des tirets Unicode avant extraction | Les LLM n'émettent pas de l'ASCII : normaliser avant tout motif ; et c'est le smoke test qui l'a révélé, pas la relecture du code |
 
 ## 4. Résultats mesurés
 
@@ -113,25 +118,137 @@ après toute ré-extraction du corpus. Alternatives écartées : seuil de décou
 bge-m3 (2× plus lourd pour le même problème de dilution). Re-run éval : ✅ **5/5**
 (L1235-3 au rang 8/8, distance 0.279 — marge nulle assumée et documentée).
 
+### Génération — jalon 4 (smoke test du 2026-07-08, gpt-oss-20b, temp. 0, k=8)
+
+| Comportement exigé | Résultat |
+|---|---|
+| Question dans le corpus → réponse sourcée | ✅ « 35 heures » + citation L3121-27, source vérifiée |
+| Question conditionnelle → règle + réserves | ✅ synthèse de 3 articles (L3121-20, -22, -27) avec calcul 48−35=13 h et la limite moyenne de 44 h sur 12 semaines |
+| Question hors corpus → refus | ✅ « Je ne trouve pas cette information dans ma base. » — aucune invention |
+| Avertissement juridique | ✅ 3/3 (concaténé en code) |
+| Citations vérifiées contre le contexte | ✅ 4 citations, 0 non vérifiée (après correction des tirets Unicode U+2011) |
+| Date du corpus affichée | ✅ 3/3 |
+
+Point de vigilance noté : la réponse conditionnelle ne mentionne ni le
+contingent annuel ni « sauf accord collectif » — règle 4 du prompt à durcir
+si le comportement se répète sur d'autres questions conditionnelles.
+→ Résolu au run suivant (few-shot) : « sauf disposition contraire dans une
+convention ou un accord collectif » présent.
+
+**Run du 2026-07-09 (6 cas, décomposition + modérateur actifs)** :
+- MULTIPLE réparée par le prompt few-shot : congés payés répondus (L3141-3
+  cité avec extrait, plafond 30 jours) + rupture conventionnelle — 10 sources
+  vérifiées ;
+- FAMILIÈRE désormais reformulée (« me faire virer » → « licencier ») ;
+- INJECTION bloquée par le modérateur (« Ignore tes instructions... ») ;
+- 3 citations non vérifiées signalées (L1234-9, L2411-1, L2411-2) : des
+  RENVOIS contenus dans le texte des chunks — cas d'usage de la « boucle de
+  rattrapage » (lookup par numero + une re-génération), candidate jalon 6.
+
+### LIGNE DE BASE eval_rag (2026-07-09, e5-base, k=8, gpt-oss-20b, 12 cas)
+
+| Métrique | Score | Détail |
+|---|---|---|
+| **Justesse** | **9/9** | article attendu cité ET vérifié sur toutes les questions normales |
+| **Fidélité** | **7/9** | 2 réponses citent des RENVOIS hors contexte : L1234-9 (×2), L2411-1, L2411-2 — cible chiffrée de la boucle de rattrapage |
+| **Garanties** | **15/15** | refus hors corpus 2/2 · blocage injection 1/1 · avertissement 12/12 |
+
+Règle d'or : toute modification (hybride, corpus complet, modèle) doit égaler
+ou battre cette ligne de base, sinon rejet. Difficulté rencontrée pendant ce
+run : 429 Groq (8 000 TPM au palier gratuit) → retry à attente croissante
+dans `Agent._complete` + pause 25 s entre les questions de l'éval.
+
+### A/B recherche hybride (2026-07-09) — ADOPTÉE ✅
+
+| Question | Vectoriel pur | Hybride (BM25 + RRF + garantie) |
+|---|---|---|
+| 5 questions sémantiques | 5/5 (L1235-3 au rang 8/8, marge nulle) | 5/5 (**L1235-3 remonté au rang 5/8** — repêché par le canal lexical) |
+| « Que dit l'article L3121-1 ? » | ❌ absent du top-8 (le vectoriel remonte ses FRÈRES L3121-2/-3/-8, pas lui) | ✅ **rang 1** (garantie par numéro) |
+| **Bilan** | **5/6** | **6/6** |
+
+Double bénéfice mesuré : le cas lexical garanti (amélioration officielle du
+jalon 6) ET la marge nulle de L1235-3 résorbée (rang 8 → 5). Le drapeau
+`config.RECHERCHE_HYBRIDE = True` devient le mode de production.
+
+### PASSAGE À L'ÉCHELLE — corpus complet (2026-07-09, 12 525 chunks)
+
+**Indexation** : 11 495 articles → 12 525 chunks (~1 030 découpés aux alinéas),
+encodage CPU **15 min 26**, insertion par lots de 5 000 (bug du plafond
+ChromaDB 5 461 corrigé), rechargement sans réencodage ✅ vérifié à l'échelle,
+métadonnées complètes (`legiarti` inclus — les liens Légifrance sont prêts).
+
+**eval_retrieval — l'A/B à deux échelles (l'argument massue)** :
+
+| Mode | 555 chunks | 12 525 chunks |
+|---|---|---|
+| Vectoriel pur | 5/6 (L1235-3 rang 8) | **4/6** — L1235-3 coulé, « que dit L3121-1 ? » absurde |
+| **Hybride** | 6/6 (L1235-3 rang 5) | **6/6** — L1235-3 rang 5 tenu, L3121-1 rang 1 |
+
+→ Sans la recherche hybride construite la veille, le corpus complet aurait
+cassé le retrieval. La fusion BM25+RRF et la garantie par numéro absorbent
+20× plus de distracteurs sans broncher.
+
+**eval_rag** : justesse **8/9** (régression : « je peux me faire virer sans
+préavis ? » → zéro citation, diagnostic en cours) · fidélité **8/9** (en
+HAUSSE : la base élargie contient les articles que les renvois citaient) ·
+garanties **15/15**. Bonus : les articles réglementaires (D3121-25...)
+enrichissent les réponses.
+
+**DOSSIER OUVERT — refus à tort sur la question familière** : diagnostic en
+3 sondes : reformulation ✅ (« Un employeur peut-il licencier sans respecter
+de préavis ? ») → retrieval ✅ (L1234-1 au RANG 1) → le LLM refuse quand même.
+Correctif règle 3 du prompt (déduire ≠ inventer) : INSUFFISANT (re-testé,
+refus persistant ; refus légitimes Japon/TVA intacts). Prochaine hypothèse :
+le générateur reçoit la question d'origine familière — tester la version
+reformulée en direct ; si elle passe → donner les sous-questions reformulées
+au générateur ; sinon → gpt-oss-20b trop timide sur ce pattern (température,
+ou modèle). État accepté temporairement : 8/9 documenté.
+
 ### Expériences envisagées (A/B sur le jeu d'évaluation)
 
+- ☑ Recherche hybride BM25+RRF → adoptée (voir ci-dessus)
+- ☒ HyDE → écarté avec justification (décision D14)
 - ☐ e5-base vs `BAAI/bge-m3` (fenêtre 8k → plus de découpe) — seulement si un article découpé fait échouer l'éval
 - ☐ Chevauchement d'alinéas (`chevauchement=1`) — seulement si une partie `#pN` rate sa question
 
-## 5. Reste à faire
+## 5. Plan de la session du 2026-07-09 (priorisé)
 
-1. ☐ Merger la PR `feature/corpus` → `dev`
-2. ☐ Exécuter l'indexation (×2 : création puis rechargement) + l'éval retrieval → remplir §4
-3. ☐ Commits + PR `feature/vectordb` → `dev` → **tag v0.1.0**
-4. ☐ Jalon 4 : prompt système (citations, refus hors corpus, conditionnels Q4/Q5) + `rag.py` (Groq temp. 0, avertissement en code, citations vérifiées contre les métadonnées)
-   - **RAPPEL (demande du binôme)** : concevoir `rag.py` pour la **décomposition
-     multi-questions** — un input complexe/multiple est découpé en sous-questions
-     par un 1er appel LLM, **un retrieval par sous-question**, fusion des chunks
-     dédoublonnés, puis une génération unique. Au minimum : structurer le code
-     pour que l'étape retrieval accepte une LISTE de questions (même si la v1
-     n'en passe qu'une), pour brancher la décomposition sans refactor au jalon 6.
-5. ☐ Jalon 5 : `main.py` (CLI interactive, accueil « une question à la fois » en v1), README finalisé, `COMPTE_RENDU.md` → **tag v1.0.0**
-6. ☐ Jalon 6 : recherche hybride (regex `L\d{4}-\d+` → lookup métadonnées), **décomposition multi-questions / mode comparaison** (cf. rappel jalon 4), et/ou questions datées sur la collection historique (+ dédoublonnage par numéro)
+**A. Clôture des branches en cours (~30 min)**
+1. ☐ Vérifier/merger la PR `feature/rag` → `dev` (8 commits)
+2. ☐ PR `feature/moderator` → `dev` (4 commits, smoke test 6/6)
+
+**B. La mesure d'abord — ✅ FAIT**
+3. ☑ `tests/eval_rag.py` : ligne de base 9/9 · 7/9 · 15/15 (voir §4)
+
+**C. Recherche hybride — ✅ FAIT (adoptée) / HyDE écarté**
+4. ☑ BM25 + RRF + garantie numéros : A/B 6/6 vs 5/6, L1235-3 rang 8→5 (§4)
+   — reste : valider le bout-en-bout (`eval_rag` avec hybride actif ≥ ligne de base)
+5. ☒ HyDE écarté avec justification (décision D14)
+
+**D. Corpus complet du Code du travail — ⚠ décisions de coût**
+6. ☐ Étendre à TOUT le code (11 683 articles) : **en vigueur SEULEMENT hors
+   des 5 thèmes** (l'historisation intégrale ferait ~30 000 appels → quotas
+   PISTE). Estimation : ~12 000 appels ≈ 1 h d'extraction + ~1 h d'encodage
+   CPU. Après : re-calibrer k (L1235-3 à marge nulle), re-valider le refus
+   hors corpus (plus difficile avec une base large)
+   → grouper avec le **RAPPEL lien Légifrance** : ajouter `legiarti` à
+   `build_document()` + métadonnées chunks → URL
+   `https://www.legifrance.gouv.fr/codes/article_lc/<LEGIARTI>` — une seule
+   ré-extraction pour les deux besoins
+7. ☐ A/B modèles d'embedding sur le jeu d'éval : e5-base (référence) vs
+   bge-m3 vs e5-large — ~1-2 h d'encodage CPU **par modèle** ; scores au §4
+
+**E. v1.0.0 — le barème avant les bonus**
+8. ☐ Jalon 5 : `main.py` (CLI interactive, accueil « une question à la
+   fois »), README finalisé (Q1-Q5 alignées sur le réel : e5-base, k=8,
+   historisation, décomposition), `COMPTE_RENDU.md` → **tag v1.0.0**
+9. ☐ Déploiement (post-v1.0.0, hors barème) : AWS Lightsail/EC2 ≥ 2 Go RAM,
+   modèle pré-téléchargé au build, `chroma_db/` sur disque persistant,
+   corpus depuis S3 `corpus/latest/` — nécessite une interface web
+
+**Améliorations jalon 6 restantes (candidates)** : boucle de rattrapage des
+renvois (citations non vérifiées → lookup par `numero` → une re-génération),
+questions datées (collection historique + dédoublonnage), mode comparaison.
 
 ## 6. Pistes « avec plus de temps » (pour le compte rendu)
 

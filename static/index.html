@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Juriste du diable — assistant Code du travail</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>⚖ Juriste du diable</h1>
+    <p class="sous-titre">Assistant Code du travail — réponses sourcées, articles cliquables</p>
+    <button id="effacer" title="Effacer l'historique affiché">Effacer l'historique</button>
+  </header>
+
+  <main id="fil"></main>
+
+  <div id="chargement" hidden>
+    <span class="spinner"></span> Recherche dans le Code du travail…
+  </div>
+
+  <form id="formulaire" autocomplete="off">
+    <input id="question" type="text" placeholder="Posez votre question (une à la fois) — ex. : Combien d'heures supplémentaires par semaine ?" required>
+    <button type="submit" id="envoyer">Envoyer</button>
+  </form>
+
+  <footer>
+    Cet assistant ne fournit pas de conseil juridique. Consultez un avocat ou
+    l'inspection du travail pour votre situation personnelle.
+  </footer>
+
+  <script>
+    const fil = document.getElementById("fil");
+    const formulaire = document.getElementById("formulaire");
+    const champ = document.getElementById("question");
+    const chargement = document.getElementById("chargement");
+    const boutonEnvoyer = document.getElementById("envoyer");
+    const CLE_HISTORIQUE = "jdd_historique";
+
+    // ----- Historique VISUEL : tableau en mémoire + localStorage -----
+    // (chaque question reste indépendante côté serveur — la mémoire
+    // conversationnelle viendra plus tard, sur sa propre branche)
+    let historique = [];
+    try { historique = JSON.parse(localStorage.getItem(CLE_HISTORIQUE)) || []; }
+    catch { historique = []; }
+
+    function sauvegarder() {
+      localStorage.setItem(CLE_HISTORIQUE, JSON.stringify(historique));
+    }
+
+    function echapper(texte) {
+      const div = document.createElement("div");
+      div.textContent = texte;
+      return div.innerHTML;
+    }
+
+    // Mise en forme minimale de la réponse : échappement HTML d'abord,
+    // puis **gras** et retours à la ligne.
+    function formater(texte) {
+      return echapper(texte)
+        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/\n/g, "<br>");
+    }
+
+    function lienLegifrance(source) {
+      const libelle = `Article ${echapper(source.numero)} (${echapper(source.section)}, en vigueur depuis le ${echapper(source.version_depuis || "?")})`;
+      if (!source.legiarti) return libelle;
+      const url = `https://www.legifrance.gouv.fr/codes/article_lc/${encodeURIComponent(source.legiarti)}`;
+      return `<a href="${url}" target="_blank" rel="noopener">${libelle} ↗</a>`;
+    }
+
+    function afficherMessage(message) {
+      const bloc = document.createElement("div");
+      bloc.className = "message " + message.role;
+
+      if (message.role === "utilisateur") {
+        bloc.innerHTML = formater(message.texte);
+      } else if (message.role === "erreur") {
+        bloc.innerHTML = "⚠ " + formater(message.texte);
+      } else {
+        let html = "";
+        if (message.sous_questions && message.sous_questions.length) {
+          html += `<details class="sous-questions"><summary>Recherches effectuées (${message.sous_questions.length})</summary><ul>`
+            + message.sous_questions.map(sq => `<li>${echapper(sq)}</li>`).join("")
+            + "</ul></details>";
+        }
+        html += `<div class="reponse">${formater(message.reponse)}</div>`;
+        if (message.sources && message.sources.length) {
+          html += `<div class="sources"><strong>Sources :</strong><ul>`
+            + message.sources.map(s => `<li>${lienLegifrance(s)}</li>`).join("")
+            + "</ul></div>";
+        }
+        if (message.citations_non_verifiees && message.citations_non_verifiees.length) {
+          html += `<div class="non-verifiees">⚠ Références citées mais absentes du contexte fourni (non vérifiées) : ${message.citations_non_verifiees.map(echapper).join(", ")}</div>`;
+        }
+        html += `<div class="pied">Corpus extrait le ${echapper(message.date_corpus || "?")} — vérifiez sur legifrance.gouv.fr<br>⚖ ${echapper(message.avertissement || "")}</div>`;
+        bloc.innerHTML = html;
+      }
+      fil.appendChild(bloc);
+      bloc.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+
+    function toutAfficher() {
+      fil.innerHTML = "";
+      historique.forEach(afficherMessage);
+    }
+
+    formulaire.addEventListener("submit", async (evt) => {
+      evt.preventDefault();
+      const question = champ.value.trim();
+      if (!question) return;
+
+      historique.push({ role: "utilisateur", texte: question });
+      sauvegarder();
+      afficherMessage(historique[historique.length - 1]);
+
+      champ.value = "";
+      champ.disabled = true;
+      boutonEnvoyer.disabled = true;
+      chargement.hidden = false;
+
+      try {
+        const reponse = await fetch("/api/question", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question }),
+        });
+        if (!reponse.ok) {
+          const detail = (await reponse.json().catch(() => ({}))).detail;
+          throw new Error(detail || `Erreur ${reponse.status}`);
+        }
+        const donnees = await reponse.json();
+        donnees.role = "assistant";
+        historique.push(donnees);
+      } catch (erreur) {
+        historique.push({ role: "erreur", texte: String(erreur.message || erreur) });
+      }
+
+      sauvegarder();
+      afficherMessage(historique[historique.length - 1]);
+      chargement.hidden = true;
+      champ.disabled = false;
+      boutonEnvoyer.disabled = false;
+      champ.focus();
+    });
+
+    document.getElementById("effacer").addEventListener("click", () => {
+      historique = [];
+      sauvegarder();
+      toutAfficher();
+      champ.focus();
+    });
+
+    toutAfficher();
+    champ.focus();
+  </script>
+</body>
+</html>
