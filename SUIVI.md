@@ -16,7 +16,8 @@
 | 3 — Chunking + indexation | corpus.py, vectordb.py, index.py | `feature/vectordb` | 🔄 code écrit — indexation à exécuter |
 | 3bis — Retrieval seul | tests/eval_retrieval.py (5 questions) | `feature/vectordb` | ⏳ à exécuter |
 | — | **Tag v0.1.0 sur main** | | ⏳ |
-| 4 — Génération | Agent (classe mère) + RAG, prompt système, citations vérifiées | `feature/rag` | ✅ validé (3 comportements) — commits/PR à faire |
+| 4 — Génération | Agent (classe mère) + RAG, prompt système, citations vérifiées, décomposition | `feature/rag` | ✅ 8 commits — PR vers dev à merger |
+| 6a — Modérateur | Moderator(Agent), modèle safeguard, étape 0 du pipeline | `feature/moderator` | ✅ 4 commits, injection bloquée au smoke test — PR à faire |
 | 5 — CLI | main.py (boucle interactive), README final | `feature/cli` | ⏳ |
 | — | **Tag v1.0.0 sur main** | | ⏳ |
 | 6 — Amélioration | recherche hybride et/ou questions datées (historique) | à définir | ⏳ |
@@ -128,34 +129,67 @@ bge-m3 (2× plus lourd pour le même problème de dilution). Re-run éval : ✅ 
 Point de vigilance noté : la réponse conditionnelle ne mentionne ni le
 contingent annuel ni « sauf accord collectif » — règle 4 du prompt à durcir
 si le comportement se répète sur d'autres questions conditionnelles.
+→ Résolu au run suivant (few-shot) : « sauf disposition contraire dans une
+convention ou un accord collectif » présent.
+
+**Run du 2026-07-09 (6 cas, décomposition + modérateur actifs)** :
+- MULTIPLE réparée par le prompt few-shot : congés payés répondus (L3141-3
+  cité avec extrait, plafond 30 jours) + rupture conventionnelle — 10 sources
+  vérifiées ;
+- FAMILIÈRE désormais reformulée (« me faire virer » → « licencier ») ;
+- INJECTION bloquée par le modérateur (« Ignore tes instructions... ») ;
+- 3 citations non vérifiées signalées (L1234-9, L2411-1, L2411-2) : des
+  RENVOIS contenus dans le texte des chunks — cas d'usage de la « boucle de
+  rattrapage » (lookup par numero + une re-génération), candidate jalon 6.
 
 ### Expériences envisagées (A/B sur le jeu d'évaluation)
 
 - ☐ e5-base vs `BAAI/bge-m3` (fenêtre 8k → plus de découpe) — seulement si un article découpé fait échouer l'éval
 - ☐ Chevauchement d'alinéas (`chevauchement=1`) — seulement si une partie `#pN` rate sa question
 
-## 5. Reste à faire
+## 5. Plan de la session du 2026-07-09 (priorisé)
 
-1. ☐ Merger la PR `feature/corpus` → `dev`
-2. ☐ Exécuter l'indexation (×2 : création puis rechargement) + l'éval retrieval → remplir §4
-3. ☐ Commits + PR `feature/vectordb` → `dev` → **tag v0.1.0**
-4. ☐ Jalon 4 : prompt système (citations, refus hors corpus, conditionnels Q4/Q5) + `rag.py` (Groq temp. 0, avertissement en code, citations vérifiées contre les métadonnées)
-   - **RAPPEL (demande du binôme)** : concevoir `rag.py` pour la **décomposition
-     multi-questions** — un input complexe/multiple est découpé en sous-questions
-     par un 1er appel LLM, **un retrieval par sous-question**, fusion des chunks
-     dédoublonnés, puis une génération unique. Au minimum : structurer le code
-     pour que l'étape retrieval accepte une LISTE de questions (même si la v1
-     n'en passe qu'une), pour brancher la décomposition sans refactor au jalon 6.
-5. ☐ Jalon 5 : `main.py` (CLI interactive, accueil « une question à la fois » en v1), README finalisé, `COMPTE_RENDU.md` → **tag v1.0.0**
-   - **RAPPEL (demande du binôme) — lien Légifrance dans les sources** :
-     afficher l'URL de chaque article cité
-     (`https://www.legifrance.gouv.fr/codes/article_lc/<LEGIARTI>`).
-     Prérequis : stocker l'identifiant `legiarti` dans `build_document()`
-     (build_corpus le possède déjà via la table des matières mais ne l'écrit
-     pas dans le JSON) → l'ajouter au schéma + aux métadonnées des chunks
-     (corpus.py) → **ré-extraction du corpus + réindexation + re-run de
-     l'éval** (attention : L1235-3 au rang 8/8, marge nulle — re-vérifier).
-6. ☐ Jalon 6 : recherche hybride (regex `L\d{4}-\d+` → lookup métadonnées), **décomposition multi-questions / mode comparaison** (cf. rappel jalon 4), et/ou questions datées sur la collection historique (+ dédoublonnage par numéro)
+**A. Clôture des branches en cours (~30 min)**
+1. ☐ Vérifier/merger la PR `feature/rag` → `dev` (8 commits)
+2. ☐ PR `feature/moderator` → `dev` (4 commits, smoke test 6/6)
+
+**B. La mesure d'abord (~1 h) — prérequis de tous les A/B qui suivent**
+3. ☐ `tests/eval_rag.py` : noter les réponses sur ~12 questions annotées —
+   justesse (article attendu ∈ sources), fidélité (ratio citations vérifiées),
+   garanties (refus hors corpus, blocage injection, avertissement) → scores au §4
+
+**C. Recherche hybride — levier n°3 du cours (~2 h)**
+4. ☐ BM25 lexical (`rank_bm25`) sur les chunks + fusion **RRF** avec le
+   classement vectoriel dans le retrieve ; cas garanti : « que dit L3121-1 ? »
+   (lookup direct par métadonnée `numero`) ; **A/B avant/après** sur
+   eval_retrieval + eval_rag
+5. ☐ (si temps) HyDE en A/B — réponse hypothétique embeddée ; à mesurer
+   contre la décomposition déjà en place
+
+**D. Corpus complet du Code du travail — ⚠ décisions de coût**
+6. ☐ Étendre à TOUT le code (11 683 articles) : **en vigueur SEULEMENT hors
+   des 5 thèmes** (l'historisation intégrale ferait ~30 000 appels → quotas
+   PISTE). Estimation : ~12 000 appels ≈ 1 h d'extraction + ~1 h d'encodage
+   CPU. Après : re-calibrer k (L1235-3 à marge nulle), re-valider le refus
+   hors corpus (plus difficile avec une base large)
+   → grouper avec le **RAPPEL lien Légifrance** : ajouter `legiarti` à
+   `build_document()` + métadonnées chunks → URL
+   `https://www.legifrance.gouv.fr/codes/article_lc/<LEGIARTI>` — une seule
+   ré-extraction pour les deux besoins
+7. ☐ A/B modèles d'embedding sur le jeu d'éval : e5-base (référence) vs
+   bge-m3 vs e5-large — ~1-2 h d'encodage CPU **par modèle** ; scores au §4
+
+**E. v1.0.0 — le barème avant les bonus**
+8. ☐ Jalon 5 : `main.py` (CLI interactive, accueil « une question à la
+   fois »), README finalisé (Q1-Q5 alignées sur le réel : e5-base, k=8,
+   historisation, décomposition), `COMPTE_RENDU.md` → **tag v1.0.0**
+9. ☐ Déploiement (post-v1.0.0, hors barème) : AWS Lightsail/EC2 ≥ 2 Go RAM,
+   modèle pré-téléchargé au build, `chroma_db/` sur disque persistant,
+   corpus depuis S3 `corpus/latest/` — nécessite une interface web
+
+**Améliorations jalon 6 restantes (candidates)** : boucle de rattrapage des
+renvois (citations non vérifiées → lookup par `numero` → une re-génération),
+questions datées (collection historique + dédoublonnage), mode comparaison.
 
 ## 6. Pistes « avec plus de temps » (pour le compte rendu)
 

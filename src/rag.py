@@ -23,10 +23,17 @@ import re
 
 from src import config
 from src.agent import Agent
+from src.moderator import Moderator
 from src.vectordb import VectorDB
 
 # Motif d'un numéro d'article de la partie législative (tolère « L. 3121-27 »).
 MOTIF_ARTICLE = re.compile(r"[LRD]\.?\s?\d{4}(?:-\d+)+")
+
+# Message renvoyé quand le modérateur bloque une tentative de détournement.
+REFUS_INJECTION = (
+    "Votre demande a été identifiée comme une tentative de détournement du "
+    "système et ne peut pas être traitée."
+)
 
 
 class RAG(Agent):
@@ -41,6 +48,8 @@ class RAG(Agent):
         # Prompt de l'étage de décomposition (second rôle du même agent).
         with open(config.DECOMPOSE_PROMPT_PATH, encoding="utf-8") as f:
             self.decompose_prompt = f.read()
+        # Le vigile : modération AVANT tout appel au LLM principal.
+        self.moderator = Moderator()
 
     # ------------------------------------------------------------------ #
     # 1. Décomposition                                                    #
@@ -126,6 +135,19 @@ class RAG(Agent):
         Clés : reponse, sources (articles cités ET vérifiés, avec leurs
         métadonnées), citations_non_verifiees, date_corpus, avertissement.
         """
+        # 0. Modération AVANT tout : un message bloqué n'atteint jamais le
+        # décomposeur ni le générateur (décision de sécurité, cf. mini-TP).
+        verdict = self.moderator.moderate(question)
+        if verdict["is_prompt_injection"]:
+            return {
+                "reponse": REFUS_INJECTION,
+                "sous_questions": [],
+                "sources": [],
+                "citations_non_verifiees": [],
+                "date_corpus": "—",
+                "avertissement": config.AVERTISSEMENT,
+            }
+
         sous_questions = self._decompose(question)
         chunks = self._retrieve_multi(sous_questions)
         reponse = self._complete(self._build_system_prompt(chunks), question)
