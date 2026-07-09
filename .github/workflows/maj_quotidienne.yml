@@ -1,0 +1,26 @@
+# Mise à jour quotidienne : redéploie le service Railway chaque nuit.
+# Le redéploiement relance boot.sh -> src/maj.py, qui ne reconstruit la base
+# QUE si le dump SocialGouv/legi-data a changé (comparaison de SHA).
+# Coût d'une nuit sans changement : ~1 min d'indisponibilité à 04h00 UTC.
+#
+# Prérequis (une fois, dans GitHub -> Settings -> Secrets and variables ->
+# Actions -> New repository secret) :
+#   RAILWAY_TOKEN      : jeton créé dans Railway (Project Settings -> Tokens)
+#   RAILWAY_SERVICE_ID : l'identifiant du service (Settings du service)
+
+name: Mise à jour quotidienne de la base
+
+on:
+  schedule:
+    - cron: "0 4 * * *"    # 04h00 UTC chaque jour
+  workflow_dispatch: {}     # + déclenchement manuel depuis l'onglet Actions
+
+jobs:
+  redeployer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Redéployer le service Railway
+        run: npx -y @railway/cli redeploy --service "$SERVICE_ID" --yes
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
