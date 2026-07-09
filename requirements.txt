@@ -5,6 +5,9 @@ requests
 sentence-transformers
 chromadb
 
+# Recherche hybride (index lexical BM25, fusionné en RRF avec le vectoriel)
+rank_bm25
+
 # Génération + configuration
 groq
 python-dotenv

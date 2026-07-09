@@ -40,6 +40,10 @@ N_CHUNKS = 8
 # plusieurs sous-questions (k chacune) : sans plafond, 4 sous-questions × 8
 # chunks = 32 chunks ≈ 10 000 tokens — le contexte se noie et la facture grimpe.
 N_CHUNKS_MAX_TOTAL = 16
+# Recherche hybride : fusion RRF du classement vectoriel et du classement
+# lexical BM25 + garantie sur les numéros d'articles cités dans la question.
+# Drapeau pour l'A/B : False = vectoriel pur (ligne de base).
+RECHERCHE_HYBRIDE = True
 # Nombre maximal de sous-questions issues de la décomposition.
 MAX_SOUS_QUESTIONS = 4
 
