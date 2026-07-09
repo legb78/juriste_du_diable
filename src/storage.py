@@ -11,9 +11,18 @@ Deux usages :
   conteneur au lieu de l'embarquer dans l'image.
 """
 
+import tempfile
+import zipfile
+from pathlib import Path
+
 import boto3
 
 from src import config
+
+# L'archive de la base COMPLÈTE (chroma_db + data, sans le dump re-téléchargeable) :
+# publiée depuis le poste local, téléchargée par le serveur au premier boot —
+# ~2 min de download contre ~25 min de reconstruction.
+CLE_BASE = "base/base_complete.zip"
 
 
 def _client():
@@ -50,6 +59,65 @@ def upload_corpus(chemin_local, date_extraction):
     for cle in cles:
         s3.upload_file(str(chemin_local), config.AWS_S3_BUCKET, cle)
     return cles
+
+
+def _ajouter_dossier(archive, dossier, prefixe):
+    """Ajoute récursivement un dossier à l'archive sous le préfixe donné."""
+    for chemin in sorted(dossier.rglob("*")):
+        if chemin.is_file():
+            archive.write(chemin, f"{prefixe}/{chemin.relative_to(dossier)}")
+
+
+def publier_base():
+    """Zippe la base construite localement (chroma_db + data) et l'envoie sur S3.
+
+    Le dump legi-data (56 Mo) est exclu : re-téléchargeable gratuitement.
+    Renvoie la taille de l'archive en Mo, ou None si S3 n'est pas configuré.
+    """
+    s3 = _client()
+    if s3 is None:
+        return None
+    if not (config.CHROMA_PATH.exists() and config.CORPUS_PATH.exists()):
+        raise FileNotFoundError(
+            "Base ou corpus absents en local : rien à publier "
+            "(lancez build_corpus_legidata puis index d'abord)."
+        )
+    with tempfile.TemporaryDirectory() as tmp:
+        chemin_archive = Path(tmp) / "base_complete.zip"
+        with zipfile.ZipFile(chemin_archive, "w", zipfile.ZIP_DEFLATED) as archive:
+            _ajouter_dossier(archive, config.CHROMA_PATH, "chroma_db")
+            for element in sorted(config.DATA_DIR.iterdir()):
+                if element.name == "legidata_code_travail.json":
+                    continue  # le dump : lourd et re-téléchargeable
+                if element.is_file():
+                    archive.write(element, f"data/{element.name}")
+                else:
+                    _ajouter_dossier(archive, element, f"data/{element.name}")
+        taille_mo = chemin_archive.stat().st_size // (1024 * 1024)
+        s3.upload_file(str(chemin_archive), config.AWS_S3_BUCKET, CLE_BASE)
+    return taille_mo
+
+
+def telecharger_base():
+    """Récupère l'archive de base depuis S3 et la déploie sur RACINE_DONNEES.
+
+    Renvoie True si la base a été déployée ; False si S3 n'est pas configuré
+    ou si aucune archive n'a été publiée — l'appelant se rabat alors sur la
+    reconstruction locale.
+    """
+    s3 = _client()
+    if s3 is None:
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        chemin_archive = Path(tmp) / "base_complete.zip"
+        try:
+            s3.download_file(config.AWS_S3_BUCKET, CLE_BASE, str(chemin_archive))
+        except Exception:
+            return False  # pas d'archive publiée, ou accès refusé
+        config.RACINE_DONNEES.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(chemin_archive) as archive:
+            archive.extractall(config.RACINE_DONNEES)
+    return True
 
 
 def download_corpus(chemin_local):
