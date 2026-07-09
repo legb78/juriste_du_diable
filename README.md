@@ -1,154 +1,192 @@
 # Juriste du diable — Assistant Code du travail (RAG)
 
-Assistant juridique en ligne de commande capable de répondre en langage naturel à des
-questions sur le droit du travail français, **en citant systématiquement les articles**
-du Code du travail sur lesquels il s'appuie — et en refusant de répondre quand
-l'information n'est pas dans sa base, plutôt qu'inventer.
+Assistant juridique capable de répondre en langage naturel à des questions sur
+le droit du travail français, **en citant systématiquement les articles** du
+Code du travail — et en refusant de répondre quand l'information n'est pas
+dans sa base, plutôt qu'inventer. Disponible en **CLI** et en **interface web**.
 
-Projet final M2 MD5 — Data & IA. Implémentation **sans framework RAG** (LangChain et
-LlamaIndex interdits) : chaque brique (corpus, chunking, embeddings, base vectorielle,
-prompt, appel LLM) est écrite à la main.
+🌐 **Démo en ligne : <https://juristedudiable-production.up.railway.app>**
 
-> ⚠️ **Cet assistant ne fournit pas de conseil juridique. Consultez un avocat ou
-> l'inspection du travail pour votre situation personnelle.** Cette mention accompagne
-> chaque réponse du système ; elle est ajoutée par le code, pas par le LLM (voir Q2/Q5).
+Projet final M2 MD5 — Data & IA. Implémentation **sans framework RAG**
+(LangChain et LlamaIndex interdits) : chaque brique — corpus, chunking,
+embeddings, base vectorielle, recherche hybride, prompts, agents — est écrite
+à la main.
+
+> ⚠️ **Cet assistant ne fournit pas de conseil juridique. Consultez un avocat
+> ou l'inspection du travail pour votre situation personnelle.** Cette mention
+> accompagne chaque réponse : elle est concaténée **par le code** (`rag.py`),
+> jamais déléguée au LLM.
 
 ---
 
-## Questions de réflexion (traitées avant d'écrire le pipeline)
+## Architecture
+
+```
+CONSTRUCTION (une fois)                      CHAQUE QUESTION
+─────────────────────────                    ────────────────────────────────
+dump SocialGouv/legi-data                    ⓪ Modérateur (anti-injection)
+  (56 Mo, public, quotidien)                 ① Décomposition LLM : 1-4 sous-
+        │ nettoyage (clean_text)                questions reformulées
+        ▼                                    ② Recherche HYBRIDE (100 % locale) :
+corpus 11 495 articles en vigueur               vectoriel (e5) + lexical (BM25)
+  + carte des versions (ids+dates)              fusionnés en RRF + garantie sur
+        │ chunking : 1 article = 1 chunk        les numéros d'articles cités
+        ▼                                    ③ Génération (Groq, température 0)
+ChromaDB persistante                         ④ Post-traitement EN CODE :
+  12 525 chunks, e5-base gravé                  citations vérifiées, sources
+  dans les métadonnées                          (liens Légifrance), avertissement
+
+HISTORIQUE DES VERSIONS : à la volée — la carte (locale) sait quelles
+rédactions ont existé ; le TEXTE d'une ancienne version n'est demandé à l'API
+Légifrance qu'au moment voulu, avec cache disque (src/histoire.py).
+```
+
+## Questions de réflexion (traitées avant le pipeline, mises à jour au réel)
 
 ### Q1 — Granularité du chunking
 
-**Par article** : les articles de loi sont courts, denses et autonomes ; un chunk = une
-unité juridique citable, exactement ce que la réponse doit référencer. Inconvénient :
-un article isolé perd son contexte thématique (« la présente section... »).
-
-**Par section** : préserve le contexte et les renvois internes. Inconvénients : chunks
-trop longs (le signal se dilue dans l'embedding), et une section entière remontée pour
-une question précise noie le LLM.
-
-**Notre choix — approche hybride** : *1 chunk = 1 article*, mais le texte embeddé est
-enrichi du contexte de section : `"Article {numéro} — {section} : {texte}"`. On garde
-la précision de citation de l'article ET la sémantique thématique de la section dans
-le même vecteur.
+**Choix : 1 chunk = 1 article, enrichi de son contexte** — le texte embeddé est
+`Article {numéro} — {thème} ({sous-section}) : {texte}`. L'article est l'unité
+juridique citable ; le numéro dans le vecteur fait fonctionner « que dit
+L3121-1 ? » ; la sous-section (Ordre public / Dispositions supplétives…)
+injecte le contexte. Les articles > 1 500 caractères (~9 % du corpus — la
+fenêtre de 512 tokens d'e5) sont découpés **aux frontières d'alinéas** — jamais
+en pleine phrase — chaque partie répétant l'en-tête et gardant le même numéro
+en métadonnée. Le regroupement par section a été rejeté : vecteur-moyenne flou
+et citation invérifiable. Pas de chevauchement : la coupe suit la structure du
+texte, elle n'a rien à compenser.
 
 ### Q2 — Traçabilité
 
-Le numéro d'article est stocké **aux deux endroits** :
-
-- **dans le texte embeddé** — pour que les questions mentionnant un numéro
-  (« que dit L3121-1 ? ») matchent en recherche vectorielle ;
-- **dans les métadonnées** — pour l'affichage fiable des sources.
-
-Le LLM a l'obligation (prompt) de ne citer que les numéros présents dans le contexte
-fourni ; mais on ne lui fait pas confiance : la liste des articles sources affichée à
-l'utilisateur est reconstruite **par le code** depuis les métadonnées des chunks
-récupérés, jamais depuis la sortie du LLM. Un numéro cité par le LLM mais absent du
-contexte est un signal d'hallucination.
+Le numéro d'article vit **aux deux endroits** : dans le texte embeddé (pour la
+recherche) et dans les métadonnées (pour l'affichage). Le LLM a l'obligation de
+ne citer que les numéros présents dans le contexte — mais on ne lui fait pas
+confiance : le code **vérifie chaque citation** contre les métadonnées des
+chunks réellement fournis (`_verifier_citations`, tirets Unicode normalisés).
+Les sources affichées sont reconstruites par le code, avec **lien direct vers
+le texte officiel** (`legifrance.gouv.fr/codes/article_lc/<LEGIARTI>`). Une
+citation hors contexte est signalée « non vérifiée », jamais présentée comme
+source.
 
 ### Q3 — Fraîcheur
 
-Chaque document du corpus porte une métadonnée `date_extraction`. Cette date est
-affichée avec chaque réponse (« Corpus extrait le JJ/MM/AAAA — le droit du travail
-évolue, vérifiez sur legifrance.gouv.fr »). Le système ne prétend jamais être à jour :
-il dit sur quoi il s'appuie.
+Trois niveaux : `date_extraction` (l'instantané du corpus) affichée à chaque
+réponse ; `version_depuis` (l'entrée en vigueur de la rédaction de chaque
+article cité) ; et une **mise à jour quotidienne conditionnelle** — un cron
+redéploie le service chaque nuit, et le boot compare le SHA du dump source au
+marqueur local : la base n'est reconstruite **que si le droit a changé**.
 
 ### Q4 — Réponses conditionnelles
 
-Beaucoup de réponses dépendent de la taille de l'entreprise ou de la convention
-collective. Le prompt système impose une **réponse générale assortie de réserves
-explicites** : le régime légal par défaut est énoncé (avec ses articles), puis les
-conditions qui peuvent le modifier sont signalées. Pas de question de clarification en
-v1 (la CLI reste simple) ; c'est une extension envisagée avec l'historique de
-conversation.
+Le prompt système impose la règle légale générale **puis** les réserves
+explicites (accord collectif, effectifs) quand les extraits les mentionnent.
+Mesuré au jeu d'évaluation (heures supplémentaires : synthèse de 3 articles
+avec la réserve « sauf accord collectif »).
 
 ### Q5 — La frontière du conseil juridique
 
-Question **factuelle** (« combien de jours de congés par an ? ») : le Code répond
-directement → réponse sourcée. Question d'**interprétation** (« mon licenciement
-est-il abusif ? ») : elle exige une qualification juridique d'une situation
-personnelle → le prompt instruit le LLM de ne pas trancher, d'exposer le cadre légal
-général pertinent, et de renvoyer vers un avocat ou l'inspection du travail.
-L'avertissement juridique, lui, est ajouté **en code** à chaque réponse, quelle que
-soit la question : une garantie de pipeline, pas une promesse de prompt.
-
----
+Question factuelle → réponse sourcée. Question d'appréciation personnelle
+(« mon licenciement est-il abusif ? ») → le prompt impose d'exposer le cadre
+légal général et de renvoyer vers un avocat ou l'inspection du travail, sans
+trancher le cas. L'avertissement, lui, est ajouté en code à 100 % des réponses.
 
 ## Choix techniques
 
-| Brique | Choix | Pourquoi |
+| Brique | Choix | Justification (mesurée) |
 |---|---|---|
-| Corpus | **API Légifrance (PISTE), option A** — OAuth2 client credentials | Source officielle, valorisée au barème ; repli option C (JSON manuel) si blocage |
-| Embeddings | `sentence-transformers` — modèle multilingue | Corpus 100 % français |
-| Base vectorielle | **ChromaDB persistant** | Persistance sur disque native ; le nom du modèle d'embedding est gravé dans les métadonnées de la collection et relu au rechargement |
-| LLM | **Groq**, température 0 | Restitution fidèle du corpus, pas de créativité |
-| Interface | CLI (`python -m src.main`) | Exigence du sujet, jalon 5 |
+| Corpus | **Source mixte** : dump JSON SocialGouv/legi-data (masse courante, 0 appel API) + API Légifrance OAuth2 (textes des versions passées, à la volée) | Vérifié sur les données : le dump a la *carte* des versions mais pas leurs *textes* — l'API reste la seule source de l'historique |
+| Embeddings | `intfloat/multilingual-e5-base`, préfixes `query:`/`passage:` | Entraîné pour la recherche asymétrique (question familière → texte de loi) ; benchmark FR ; adapté CPU |
+| Base vectorielle | ChromaDB persistante, **modèle gravé dans les métadonnées de la collection** et relu au rechargement | Exigence du sujet ; insertion par lots de 5 000 (plafond ChromaDB découvert à 12 525 chunks) |
+| Recherche | **Hybride : vectoriel + BM25, fusion RRF, garantie numéros** | A/B mesuré : à 12 525 chunks, vectoriel seul 4/6, hybride **6/6** ; « que dit L3121-1 ? » garanti au rang 1 |
+| LLM | `openai/gpt-oss-20b` via Groq, température 0 | Restitution fidèle du corpus ; retry à attente croissante sur les limites de débit |
+| Agents | Classe mère `Agent` → `RAG` + `Moderator` (anti-injection, étape 0 du pipeline) | Une injection est bloquée avant d'atteindre le LLM principal |
+| Améliorations (jalon 6) | Décomposition-reformulation LLM (1-4 sous-questions) · recherche hybride · modérateur · maj quotidienne conditionnelle | HyDE étudié et écarté : redondant avec la reformulation + l'entraînement asymétrique d'e5 |
 
-**Indexation et interrogation sont deux scripts séparés** : `src/index.py` construit et
-persiste la base (une fois) ; `src/main.py` la recharge **sans jamais réindexer** et
-échoue avec un message clair si elle n'existe pas.
+## Résultats mesurés (jeux d'évaluation versionnés dans `tests/`)
+
+- **Retrieval** (`eval_retrieval`) : hybride **6/6** contre vectoriel 4/6 sur
+  12 525 chunks (5 questions sémantiques + 1 lexicale) ;
+- **Bout en bout** (`eval_rag`, 12 cas annotés) : justesse **8/9**, fidélité
+  **8/9**, garanties **15/15** (refus hors corpus 2/2, blocage injection 1/1,
+  avertissement 12/12) — un cas connu de refus à tort documenté dans SUIVI.md ;
+- **Persistance** : rechargement sans réencodage vérifié (12 525 chunks, ~30 s).
 
 ## Structure du projet
 
 ```
-data/                  corpus extrait (code_travail.json)
-prompts/               prompts système versionnés (rag_system.txt, ...)
 src/
-  config.py            configuration centrale (modèles, chemins, secrets via .env)
-  legifrance.py        client API Légifrance (jeton OAuth2 + renouvellement)
-  build_corpus.py      extraction API -> data/code_travail.json
-  corpus.py            chargement du corpus (ids / documents / metadatas)
-  vectordb.py          base vectorielle persistante (ChromaDB + sentence-transformers)
-  index.py             point d'entrée : construit et persiste la base
-  rag.py               orchestration : retrieval -> prompt -> LLM -> citations + avertissement
-  main.py              point d'entrée : boucle de questions-réponses en CLI
-tests/
-  eval_retrieval.py    jeu d'évaluation du retrieval (5 questions -> article attendu)
+  config.py                 configuration centrale (modèles, chemins, thèmes, env)
+  legifrance.py             client API PISTE (OAuth2 client credentials + renouvellement)
+  build_corpus_legidata.py  extraction : dump public nettoyé + carte des versions
+  build_corpus.py           extraction alternative tout-API (option A pure)
+  corpus.py                 chunking (1 article = 1 chunk, découpe aux alinéas)
+  vectordb.py               ChromaDB persistante + recherche hybride (BM25 + RRF)
+  index.py                  construit et PERSISTE la base (séparé de l'interrogation)
+  agent.py                  classe mère des agents LLM (Groq, prompts, retry)
+  rag.py                    l'assistant : modération, décomposition, retrieval,
+                            génération, citations vérifiées, avertissement en code
+  moderator.py              agent anti-injection (modèle safeguard)
+  histoire.py               versions passées à la volée (carte + API + cache)
+  maj.py                    mise à jour conditionnelle (SHA du dump vs marqueur)
+  storage.py                S3 : instantanés du corpus, archive de la base
+  publier_base.py           publie la base locale vers S3 (déploiement rapide)
+  main.py                   CLI interactive (jalon 5)
+  api.py                    interface web (FastAPI + static/)
+prompts/                    prompts système versionnés (RAG, décomposition, modération)
+tests/                      éval retrieval (A/B), éval bout-en-bout, sondes exploratoires
+static/                     page chat (sources cliquables, historique localStorage)
+boot.sh · railway.json · .github/workflows/   déploiement et mise à jour quotidienne
+SUIVI.md                    journal de bord : décisions, difficultés, mesures
 ```
-
-## Thèmes couverts (≥ 5 exigés)
-
-1. Durée du travail et heures supplémentaires (L3121-1 à L3121-36)
-2. Congés payés (L3141-1 à L3141-32)
-3. Contrat de travail — CDI, CDD (L1221-1 à L1248-11)
-4. Licenciement (L1231-1 à L1237-20)
-5. Rupture conventionnelle (L1237-11 à L1237-19)
 
 ## Installation
 
 ```bash
 git clone https://github.com/legb78/juriste_du_diable.git
 cd juriste_du_diable
-
-python -m venv juriste_du_diable        # le venv est ignoré par Git
-juriste_du_diable\Scripts\activate      # Windows  (Linux/macOS : source juriste_du_diable/bin/activate)
-
+python -m venv juriste_du_diable
+juriste_du_diable\Scripts\activate      # Windows (Linux/macOS : source .../bin/activate)
 pip install -r requirements.txt
-
-copy .env.example .env                  # Windows  (Linux/macOS : cp .env.example .env)
-# puis renseigner GROQ_API_KEY, LEGIFRANCE_CLIENT_ID, LEGIFRANCE_CLIENT_SECRET dans .env
+copy .env.example .env                  # puis renseigner GROQ_API_KEY (obligatoire)
 ```
+
+Secrets : `GROQ_API_KEY` obligatoire (génération). `LEGIFRANCE_*` uniquement
+pour les textes des versions passées (questions datées / extraction tout-API).
+`AWS_*` optionnels (archivage S3). **Aucune clé dans le dépôt ni dans
+l'historique Git.**
 
 ## Usage
 
 ```bash
-# 1. Construire le corpus depuis l'API Légifrance (une fois)
-python -m src.build_corpus
+# 1. Construire le corpus (dump public : AUCUN identifiant requis, ~3 min)
+python -m src.build_corpus_legidata
 
-# 2. Indexer : créer et persister la base vectorielle (une fois)
+# 2. Indexer — une fois, persistant (~15-20 min d'encodage CPU)
 python -m src.index
+#    (relancer = « rechargée sans réencodage » : jamais de réindexation au lancement)
 
-# 3. Interroger (recharge la base existante, ne réindexe jamais)
-python -m src.main                                        # boucle interactive (quit pour sortir)
-python -m src.main "Quelle est la durée légale du travail ?"   # question directe
+# 3a. Interroger en CLI
+python -m src.main                                   # boucle interactive
+python -m src.main "Quelle est la durée légale du travail ?"
+
+# 3b. Ou l'interface web
+uvicorn src.api:app        # puis http://127.0.0.1:8000
+
+# Évaluations
+python -m tests.eval_retrieval    # A/B vectoriel vs hybride
+python -m tests.eval_rag          # justesse / fidélité / garanties
 ```
 
-## Workflow Git
+## Workflow Git & déploiement
 
-Workflow Scribe : `feature/*` → `dev` → `main`, chaque jalon sur sa branche avec pull
-request relue en binôme. Versions taguées : `v0.1.0` (corpus + indexation + retrieval
-validé), `v1.0.0` (pipeline complet + CLI). Aucun secret versionné : `.env` est ignoré,
-seul `.env.example` est commité.
+Workflow Scribe : `feature/*` → `dev` → `main` via pull requests relues en
+binôme ; versions taguées sur `main` (`v0.1.0` : corpus + indexation +
+retrieval validé ; `v1.0.0` : pipeline complet). Déploiement Railway suivant
+la branche de release : `boot.sh` → `maj.py` (base récupérée depuis S3 ou
+reconstruite, seulement si la source a changé) → uvicorn ; mise à jour
+quotidienne par cron GitHub Actions.
+
+**Production : <https://juristedudiable-production.up.railway.app>**
 
 ## Auteurs
 

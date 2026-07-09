@@ -35,7 +35,11 @@ class Agent:
             self.system_prompt_template = f.read()
 
     def _complete(self, system_prompt, user_message):
-        """Un appel au LLM : prompt système + message utilisateur -> texte."""
+        """Un appel au LLM : prompt système + message utilisateur -> texte.
+
+        Le plafond de tokens de sortie est explicite : sans lui, le défaut du
+        serveur tronque les réponses multi-volets en plein mot.
+        """
         completion = self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -43,5 +47,6 @@ class Agent:
                 {"role": "user", "content": user_message},
             ],
             temperature=self.temperature,
+            max_completion_tokens=config.LLM_MAX_TOKENS,
         )
         return completion.choices[0].message.content
