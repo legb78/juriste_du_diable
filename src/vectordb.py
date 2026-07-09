@@ -97,14 +97,21 @@ class VectorDB:
         ).tolist()
 
     def _index(self, ids, documents, metadatas):
-        """Encode tous les chunks et les insère dans la collection."""
+        """Encode tous les chunks et les insère PAR LOTS dans la collection.
+
+        ChromaDB plafonne un add() à ~5461 entrées : au-delà (corpus complet,
+        12 500+ chunks), l'insertion doit être découpée.
+        """
         embeddings = self._encode(documents)
-        self.collection.add(
-            ids=ids,
-            documents=documents,
-            embeddings=embeddings,
-            metadatas=metadatas,
-        )
+        LOT = 5000
+        for debut in range(0, len(ids), LOT):
+            fin = debut + LOT
+            self.collection.add(
+                ids=ids[debut:fin],
+                documents=documents[debut:fin],
+                embeddings=embeddings[debut:fin],
+                metadatas=metadatas[debut:fin],
+            )
 
     def retrieve(self, question, n=None, where=None):
         """Les `n` chunks les plus proches de `question`, du plus au moins
