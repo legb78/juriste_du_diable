@@ -42,8 +42,14 @@ def main():
     )
 
     print(f"\nBase vectorielle : {config.CHROMA_PATH}")
-    db_courante = ouvrir_ou_creer(config.COLLECTION_NAME, corpus.courant())
-    ouvrir_ou_creer(config.COLLECTION_HISTORIQUE, corpus.historique())
+    ouvrir_ou_creer(config.COLLECTION_NAME, corpus.courant())
+    if config.HISTORIQUE_A_LA_VOLEE:
+        print(
+            f"  {config.COLLECTION_HISTORIQUE} : non créée — historique à la "
+            "volée (les textes anciens sont servis par src/histoire.py)"
+        )
+    else:
+        ouvrir_ou_creer(config.COLLECTION_HISTORIQUE, corpus.historique())
 
     # Contrôle qualité exigé par le sujet : quelques chunks avec métadonnées,
     # à relire (aucun article coupé en pleine phrase, en-têtes corrects).

@@ -41,6 +41,8 @@
 | D11 | **`data/` non versionné dans Git** | Données publiques régénérables ≠ code ; instantanés archivés sur AWS S3 en clés datées (`corpus/<date>_...` + `corpus/latest/`) |
 | D12 | **Stockage objet AWS S3 optionnel par conception** (sans clés → désactivation silencieuse) | Le correcteur doit pouvoir tout exécuter sans bucket |
 | D13 | **Thèmes ordonnés du plus spécifique au plus général** dans la config | Les plages du sujet sont imbriquées (Contrat ⊃ Licenciement ⊃ Rupture conv.) — sinon 3 sections au lieu de 5 |
+| D15 | **Architecture finale du corpus : dump + historique À LA VOLÉE** (2026-07-09, décision finale après 3 itérations) : indexé = versions courantes du dump legi-data (nettoyées, 0 appel API) ; carte des versions de TOUS les articles (ids+dates, du dump) dans `versions_map.json` ; TEXTE d'une ancienne version récupéré par l'API seulement quand une question datée le demande (`src/histoire.py`, cache disque) | Vérifié sur les données : legi-data a la carte des versions mais PAS leurs textes. Le pré-téléchargement intégral (10 256 appels, ~2 h, run annulé) ne servait qu'aux questions datées — le lazy le remplace à 0-3 appels par question. Uniforme (tous les articles égaux), frais (dump quotidien), quotas préservés. Contrepartie : les questions datées exigent réseau + identifiants. Modes bulk conservés (build_corpus.py tout-API ; flags config) |
+| D14 | **HyDE écarté** (après étude) | Redondant dans notre architecture : (1) la décomposition-reformulation traduit déjà le langage familier en vocabulaire juridique ; (2) e5 est entraîné pour l'asymétrie question→document (préfixes query/passage) — HyDE vise les embedders symétriques ; (3) le canal lexical BM25 de l'hybride couvre le matching de vocabulaire exact ; (4) coût +1 appel LLM/sous-question sur un quota de 8 000 TPM, et risque de dérive quand l'hypothèse « brode ». Réversible : A/B possible contre la ligne de base si l'éval révélait un déficit sur les questions très courtes |
 
 ## 3. Difficultés rencontrées (et résolutions)
 
@@ -142,8 +144,59 @@ convention ou un accord collectif » présent.
   RENVOIS contenus dans le texte des chunks — cas d'usage de la « boucle de
   rattrapage » (lookup par numero + une re-génération), candidate jalon 6.
 
+### LIGNE DE BASE eval_rag (2026-07-09, e5-base, k=8, gpt-oss-20b, 12 cas)
+
+| Métrique | Score | Détail |
+|---|---|---|
+| **Justesse** | **9/9** | article attendu cité ET vérifié sur toutes les questions normales |
+| **Fidélité** | **7/9** | 2 réponses citent des RENVOIS hors contexte : L1234-9 (×2), L2411-1, L2411-2 — cible chiffrée de la boucle de rattrapage |
+| **Garanties** | **15/15** | refus hors corpus 2/2 · blocage injection 1/1 · avertissement 12/12 |
+
+Règle d'or : toute modification (hybride, corpus complet, modèle) doit égaler
+ou battre cette ligne de base, sinon rejet. Difficulté rencontrée pendant ce
+run : 429 Groq (8 000 TPM au palier gratuit) → retry à attente croissante
+dans `Agent._complete` + pause 25 s entre les questions de l'éval.
+
+### A/B recherche hybride (2026-07-09) — ADOPTÉE ✅
+
+| Question | Vectoriel pur | Hybride (BM25 + RRF + garantie) |
+|---|---|---|
+| 5 questions sémantiques | 5/5 (L1235-3 au rang 8/8, marge nulle) | 5/5 (**L1235-3 remonté au rang 5/8** — repêché par le canal lexical) |
+| « Que dit l'article L3121-1 ? » | ❌ absent du top-8 (le vectoriel remonte ses FRÈRES L3121-2/-3/-8, pas lui) | ✅ **rang 1** (garantie par numéro) |
+| **Bilan** | **5/6** | **6/6** |
+
+Double bénéfice mesuré : le cas lexical garanti (amélioration officielle du
+jalon 6) ET la marge nulle de L1235-3 résorbée (rang 8 → 5). Le drapeau
+`config.RECHERCHE_HYBRIDE = True` devient le mode de production.
+
+### PASSAGE À L'ÉCHELLE — corpus complet (2026-07-09, 12 525 chunks)
+
+**Indexation** : 11 495 articles → 12 525 chunks (~1 030 découpés aux alinéas),
+encodage CPU **15 min 26**, insertion par lots de 5 000 (bug du plafond
+ChromaDB 5 461 corrigé), rechargement sans réencodage ✅ vérifié à l'échelle,
+métadonnées complètes (`legiarti` inclus — les liens Légifrance sont prêts).
+
+**eval_retrieval — l'A/B à deux échelles (l'argument massue)** :
+
+| Mode | 555 chunks | 12 525 chunks |
+|---|---|---|
+| Vectoriel pur | 5/6 (L1235-3 rang 8) | **4/6** — L1235-3 coulé, « que dit L3121-1 ? » absurde |
+| **Hybride** | 6/6 (L1235-3 rang 5) | **6/6** — L1235-3 rang 5 tenu, L3121-1 rang 1 |
+
+→ Sans la recherche hybride construite la veille, le corpus complet aurait
+cassé le retrieval. La fusion BM25+RRF et la garantie par numéro absorbent
+20× plus de distracteurs sans broncher.
+
+**eval_rag** : justesse **8/9** (régression : « je peux me faire virer sans
+préavis ? » → zéro citation, diagnostic en cours) · fidélité **8/9** (en
+HAUSSE : la base élargie contient les articles que les renvois citaient) ·
+garanties **15/15**. Bonus : les articles réglementaires (D3121-25...)
+enrichissent les réponses.
+
 ### Expériences envisagées (A/B sur le jeu d'évaluation)
 
+- ☑ Recherche hybride BM25+RRF → adoptée (voir ci-dessus)
+- ☒ HyDE → écarté avec justification (décision D14)
 - ☐ e5-base vs `BAAI/bge-m3` (fenêtre 8k → plus de découpe) — seulement si un article découpé fait échouer l'éval
 - ☐ Chevauchement d'alinéas (`chevauchement=1`) — seulement si une partie `#pN` rate sa question
 
@@ -153,18 +206,13 @@ convention ou un accord collectif » présent.
 1. ☐ Vérifier/merger la PR `feature/rag` → `dev` (8 commits)
 2. ☐ PR `feature/moderator` → `dev` (4 commits, smoke test 6/6)
 
-**B. La mesure d'abord (~1 h) — prérequis de tous les A/B qui suivent**
-3. ☐ `tests/eval_rag.py` : noter les réponses sur ~12 questions annotées —
-   justesse (article attendu ∈ sources), fidélité (ratio citations vérifiées),
-   garanties (refus hors corpus, blocage injection, avertissement) → scores au §4
+**B. La mesure d'abord — ✅ FAIT**
+3. ☑ `tests/eval_rag.py` : ligne de base 9/9 · 7/9 · 15/15 (voir §4)
 
-**C. Recherche hybride — levier n°3 du cours (~2 h)**
-4. ☐ BM25 lexical (`rank_bm25`) sur les chunks + fusion **RRF** avec le
-   classement vectoriel dans le retrieve ; cas garanti : « que dit L3121-1 ? »
-   (lookup direct par métadonnée `numero`) ; **A/B avant/après** sur
-   eval_retrieval + eval_rag
-5. ☐ (si temps) HyDE en A/B — réponse hypothétique embeddée ; à mesurer
-   contre la décomposition déjà en place
+**C. Recherche hybride — ✅ FAIT (adoptée) / HyDE écarté**
+4. ☑ BM25 + RRF + garantie numéros : A/B 6/6 vs 5/6, L1235-3 rang 8→5 (§4)
+   — reste : valider le bout-en-bout (`eval_rag` avec hybride actif ≥ ligne de base)
+5. ☒ HyDE écarté avec justification (décision D14)
 
 **D. Corpus complet du Code du travail — ⚠ décisions de coût**
 6. ☐ Étendre à TOUT le code (11 683 articles) : **en vigueur SEULEMENT hors

@@ -98,12 +98,15 @@ def date_iso(ts_ms):
         return None
 
 
-def build_document(num, art, texte, debut_ms, fin_ms, en_vigueur, date_extraction):
+def build_document(num, art, texte, debut_ms, fin_ms, en_vigueur, date_extraction,
+                   legiarti):
     """Assemble un document du corpus : UNE version d'UN article.
 
     Les versions antérieures reçoivent un id suffixé par leur date d'entrée
     en vigueur ("L3121-27@2008-05-01") ; la version courante garde le numéro
-    nu, pour rester l'identifiant de citation naturel.
+    nu, pour rester l'identifiant de citation naturel. L'identifiant LEGIARTI
+    de la version est conservé : il permet le lien direct vers Légifrance
+    (https://www.legifrance.gouv.fr/codes/article_lc/<LEGIARTI>).
     """
     depuis = date_iso(debut_ms)
     jusqua = date_iso(fin_ms)
@@ -114,6 +117,7 @@ def build_document(num, art, texte, debut_ms, fin_ms, en_vigueur, date_extractio
     return {
         "id": num if en_vigueur else f"{num}@{depuis or 'inconnue'}",
         "numero": num,
+        "legiarti": legiarti,
         "titre": art["chemin"],
         "texte": texte,
         "section": art["section"],
@@ -122,7 +126,33 @@ def build_document(num, art, texte, debut_ms, fin_ms, en_vigueur, date_extractio
         "version_depuis": depuis,
         "version_jusqua": jusqua,
         "en_vigueur": en_vigueur,
+        # True si TOUTES les versions de cet article sont dans le corpus
+        # (articles des 5 thèmes) ; False si seule la version courante y est
+        # (reste du code) — permet aux questions datées d'annoncer honnêtement
+        # « historique non disponible pour cet article ».
+        "historise": bool(art.get("historiser", False)),
     }
+
+
+def section_par_defaut(chemin):
+    """Thème de repli pour les articles hors des 5 plages : l'intitulé du
+    Livre (le niveau « sujet » de la hiérarchie), sinon celui de la Partie."""
+    composantes = [c.strip() for c in chemin.split(" > ")]
+    for c in composantes:
+        if c.startswith("Livre"):
+            return c
+    for c in composantes:
+        if "partie" in c.lower():
+            return c
+    return "Code du travail"
+
+
+def ecrire_corpus(documents):
+    """Écrit le JSON (aussi utilisé comme point de sauvegarde incrémental :
+    un run de 2-3 h ne doit jamais être perdu sur un incident)."""
+    config.CORPUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(config.CORPUS_PATH, "w", encoding="utf-8") as f:
+        json.dump(documents, f, ensure_ascii=False, indent=2)
 
 
 def clean_text(brut):
@@ -166,49 +196,79 @@ def main():
             "diffère de celle attendue. Inspecter la réponse de l'API."
         )
 
-    # Texte de chaque article retenu — ET de toutes ses versions successives
-    # (historisation complète). La version courante est identifiée par son
-    # LEGIARTI issu de la table des matières ; les rédactions antérieures sont
-    # listées dans `articleVersions` et récupérées une par une.
-    print(f"\nRécupération du texte des {len(retenus)} articles (toutes versions)...")
+    # Liste de travail : les articles des thèmes (avec historisation), puis —
+    # en mode corpus complet — tout le reste du code (version courante seule,
+    # thème de repli = l'intitulé du Livre).
+    travail = [{**art, "num": num, "historiser": True}
+               for num, art in sorted(retenus.items())]
+    if config.CORPUS_COMPLET:
+        for art in tous:
+            if art["legiarti"] and art["num"] and art["num"] not in retenus:
+                travail.append(
+                    {
+                        **art,
+                        "num": art["num"],
+                        "section": section_par_defaut(art["chemin"]),
+                        "historiser": False,
+                    }
+                )
+        print(f"\nMode corpus complet : {len(travail)} articles au total "
+              f"({len(retenus)} thématisés avec historique, "
+              f"{len(travail) - len(retenus)} hors thèmes en version courante).")
+
+    # Récupération des textes. Un run complet dure 2-3 h : chaque article est
+    # protégé individuellement (une erreur = un article ignoré, pas un crash)
+    # et le JSON est sauvegardé tous les 500 articles.
+    print(f"\nRécupération du texte de {len(travail)} articles...")
     documents = []
-    nb_anciennes = 0
-    for i, (num, art) in enumerate(sorted(retenus.items()), 1):
-        detail = client.get_article(art["legiarti"])
-        texte = clean_text(detail.get("texteHtml") or detail.get("texte") or "")
-        if texte:
-            documents.append(
-                build_document(
-                    num, art, texte,
-                    detail.get("dateDebut"), detail.get("dateFin"),
-                    True, aujourd_hui,
+    nb_anciennes, nb_echecs = 0, 0
+    for i, art in enumerate(travail, 1):
+        num = art["num"]
+        try:
+            detail = client.get_article(art["legiarti"])
+            texte = clean_text(detail.get("texteHtml") or detail.get("texte") or "")
+            if texte:
+                documents.append(
+                    build_document(
+                        num, art, texte,
+                        detail.get("dateDebut"), detail.get("dateFin"),
+                        True, aujourd_hui, art["legiarti"],
+                    )
                 )
-            )
-        else:
-            print(f"  [!] {num} : texte vide, version courante ignorée")
 
-        # Versions antérieures de l'article (une requête chacune).
-        for version in detail.get("articleVersions") or []:
-            version_id = version.get("id")
-            if not version_id or version_id == art["legiarti"]:
-                continue  # version courante : déjà traitée ci-dessus
-            time.sleep(PAUSE_S)
-            vdetail = client.get_article(version_id)
-            vtexte = clean_text(vdetail.get("texteHtml") or vdetail.get("texte") or "")
-            if not vtexte:
-                continue  # certaines versions techniques sont vides
-            documents.append(
-                build_document(
-                    num, art, vtexte,
-                    vdetail.get("dateDebut"), vdetail.get("dateFin"),
-                    False, aujourd_hui,
-                )
-            )
-            nb_anciennes += 1
+            # Versions antérieures : uniquement pour les articles thématisés.
+            if art["historiser"]:
+                for version in detail.get("articleVersions") or []:
+                    version_id = version.get("id")
+                    if not version_id or version_id == art["legiarti"]:
+                        continue  # version courante : déjà traitée
+                    time.sleep(PAUSE_S)
+                    vdetail = client.get_article(version_id)
+                    vtexte = clean_text(
+                        vdetail.get("texteHtml") or vdetail.get("texte") or ""
+                    )
+                    if not vtexte:
+                        continue  # certaines versions techniques sont vides
+                    documents.append(
+                        build_document(
+                            num, art, vtexte,
+                            vdetail.get("dateDebut"), vdetail.get("dateFin"),
+                            False, aujourd_hui, version_id,
+                        )
+                    )
+                    nb_anciennes += 1
+        except Exception as erreur:  # un article ne doit jamais tuer le run
+            nb_echecs += 1
+            print(f"  [!] {num} : {erreur}")
 
-        if i % 25 == 0:
-            print(f"  {i}/{len(retenus)} articles...")
+        if i % 100 == 0:
+            print(f"  {i}/{len(travail)} articles ({len(documents)} documents)...")
+        if i % 500 == 0:
+            ecrire_corpus(documents)  # point de sauvegarde
         time.sleep(PAUSE_S)
+
+    if nb_echecs:
+        print(f"\n[!] {nb_echecs} articles en échec (réseau/API), ignorés.")
 
     # Dédoublonnage par id (deux versions partageant la même date d'entrée
     # en vigueur produiraient le même id, que ChromaDB refuserait).
@@ -217,9 +277,7 @@ def main():
         uniques.setdefault(doc["id"], doc)
     documents = list(uniques.values())
 
-    config.CORPUS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(config.CORPUS_PATH, "w", encoding="utf-8") as f:
-        json.dump(documents, f, ensure_ascii=False, indent=2)
+    ecrire_corpus(documents)
     en_vigueur = sum(1 for d in documents if d["en_vigueur"])
     print(
         f"\n{len(documents)} documents écrits dans {config.CORPUS_PATH} "

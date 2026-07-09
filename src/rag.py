@@ -79,9 +79,12 @@ class RAG(Agent):
     def _retrieve_multi(self, questions):
         """Un retrieve PAR sous-question ; fusion dédoublonnée par chunk
         (clé numéro + partie), la meilleure distance gagne ; tri global."""
+        recherche = (
+            self.db.retrieve_hybride if config.RECHERCHE_HYBRIDE else self.db.retrieve
+        )
         vus = {}
         for question in questions:
-            for chunk in self.db.retrieve(question):
+            for chunk in recherche(question):
                 cle = (chunk["metadata"]["numero"], chunk["metadata"]["partie"])
                 if cle not in vus or chunk["distance"] < vus[cle]["distance"]:
                     vus[cle] = chunk

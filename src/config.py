@@ -40,6 +40,10 @@ N_CHUNKS = 8
 # plusieurs sous-questions (k chacune) : sans plafond, 4 sous-questions × 8
 # chunks = 32 chunks ≈ 10 000 tokens — le contexte se noie et la facture grimpe.
 N_CHUNKS_MAX_TOTAL = 16
+# Recherche hybride : fusion RRF du classement vectoriel et du classement
+# lexical BM25 + garantie sur les numéros d'articles cités dans la question.
+# Drapeau pour l'A/B : False = vectoriel pur (ligne de base).
+RECHERCHE_HYBRIDE = True
 # Nombre maximal de sous-questions issues de la décomposition.
 MAX_SOUS_QUESTIONS = 4
 
@@ -67,6 +71,25 @@ LEGIFRANCE_TOKEN_URL = "https://oauth.piste.gouv.fr/api/oauth/token"
 LEGIFRANCE_API_URL = "https://api.piste.gouv.fr/dila/legifrance/lf-engine-app"
 # Identifiant LEGI du Code du travail (constant, publié par la DILA).
 LEGIFRANCE_CODE_TRAVAIL_ID = "LEGITEXT000006072050"
+
+# --- Étendue du corpus ---
+# True : TOUT le Code du travail (≈ 11 700 articles) — les articles des 5
+# thèmes gardent leur historisation complète ; les autres n'embarquent que
+# leur version en vigueur (l'historisation intégrale ferait ~30 000 appels
+# API, incompatible avec les quotas PISTE). False : les 5 thèmes seulement.
+CORPUS_COMPLET = True
+# Historique « À LA VOLÉE » (décision 2026-07-09) : le corpus indexé ne
+# contient QUE les versions courantes (dump legi-data, nettoyées). La carte
+# des versions de chaque article (ids + dates, extraite du dump) est écrite
+# dans VERSIONS_MAP_PATH ; le TEXTE d'une ancienne version n'est récupéré via
+# l'API Légifrance qu'au moment où une question datée le demande
+# (src/histoire.py), avec cache disque. Zéro pré-téléchargement massif.
+HISTORIQUE_A_LA_VOLEE = True
+# (mode alternatif conservé : False ci-dessus + True ci-dessous = tout
+# pré-télécharger et indexer, l'ancienne logique)
+HISTORISATION_COMPLETE = False
+VERSIONS_MAP_PATH = PROJECT_ROOT / "data" / "versions_map.json"
+CACHE_VERSIONS_DIR = PROJECT_ROOT / "data" / "cache_versions"
 
 # --- Thèmes du corpus (au moins 5 exigés par le sujet) ---
 # Plages d'articles indicatives du Code du travail, utilisées par build_corpus.
