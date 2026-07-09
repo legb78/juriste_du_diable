@@ -72,6 +72,13 @@ LEGIFRANCE_API_URL = "https://api.piste.gouv.fr/dila/legifrance/lf-engine-app"
 # Identifiant LEGI du Code du travail (constant, publié par la DILA).
 LEGIFRANCE_CODE_TRAVAIL_ID = "LEGITEXT000006072050"
 
+# --- Étendue du corpus ---
+# True : TOUT le Code du travail (≈ 11 700 articles) — les articles des 5
+# thèmes gardent leur historisation complète ; les autres n'embarquent que
+# leur version en vigueur (l'historisation intégrale ferait ~30 000 appels
+# API, incompatible avec les quotas PISTE). False : les 5 thèmes seulement.
+CORPUS_COMPLET = True
+
 # --- Thèmes du corpus (au moins 5 exigés par le sujet) ---
 # Plages d'articles indicatives du Code du travail, utilisées par build_corpus.
 # ATTENTION : les plages du sujet se chevauchent — « Contrat de travail »
