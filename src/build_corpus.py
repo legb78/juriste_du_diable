@@ -126,6 +126,11 @@ def build_document(num, art, texte, debut_ms, fin_ms, en_vigueur, date_extractio
         "version_depuis": depuis,
         "version_jusqua": jusqua,
         "en_vigueur": en_vigueur,
+        # True si TOUTES les versions de cet article sont dans le corpus
+        # (articles des 5 thèmes) ; False si seule la version courante y est
+        # (reste du code) — permet aux questions datées d'annoncer honnêtement
+        # « historique non disponible pour cet article ».
+        "historise": bool(art.get("historiser", False)),
     }
 
 
