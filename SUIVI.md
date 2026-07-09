@@ -41,6 +41,7 @@
 | D11 | **`data/` non versionné dans Git** | Données publiques régénérables ≠ code ; instantanés archivés sur AWS S3 en clés datées (`corpus/<date>_...` + `corpus/latest/`) |
 | D12 | **Stockage objet AWS S3 optionnel par conception** (sans clés → désactivation silencieuse) | Le correcteur doit pouvoir tout exécuter sans bucket |
 | D13 | **Thèmes ordonnés du plus spécifique au plus général** dans la config | Les plages du sujet sont imbriquées (Contrat ⊃ Licenciement ⊃ Rupture conv.) — sinon 3 sections au lieu de 5 |
+| D15 | **Architecture finale du corpus : dump + historique À LA VOLÉE** (2026-07-09, décision finale après 3 itérations) : indexé = versions courantes du dump legi-data (nettoyées, 0 appel API) ; carte des versions de TOUS les articles (ids+dates, du dump) dans `versions_map.json` ; TEXTE d'une ancienne version récupéré par l'API seulement quand une question datée le demande (`src/histoire.py`, cache disque) | Vérifié sur les données : legi-data a la carte des versions mais PAS leurs textes. Le pré-téléchargement intégral (10 256 appels, ~2 h, run annulé) ne servait qu'aux questions datées — le lazy le remplace à 0-3 appels par question. Uniforme (tous les articles égaux), frais (dump quotidien), quotas préservés. Contrepartie : les questions datées exigent réseau + identifiants. Modes bulk conservés (build_corpus.py tout-API ; flags config) |
 | D14 | **HyDE écarté** (après étude) | Redondant dans notre architecture : (1) la décomposition-reformulation traduit déjà le langage familier en vocabulaire juridique ; (2) e5 est entraîné pour l'asymétrie question→document (préfixes query/passage) — HyDE vise les embedders symétriques ; (3) le canal lexical BM25 de l'hybride couvre le matching de vocabulaire exact ; (4) coût +1 appel LLM/sous-question sur un quota de 8 000 TPM, et risque de dérive quand l'hypothèse « brode ». Réversible : A/B possible contre la ligne de base si l'éval révélait un déficit sur les questions très courtes |
 
 ## 3. Difficultés rencontrées (et résolutions)
@@ -167,6 +168,30 @@ dans `Agent._complete` + pause 25 s entre les questions de l'éval.
 Double bénéfice mesuré : le cas lexical garanti (amélioration officielle du
 jalon 6) ET la marge nulle de L1235-3 résorbée (rang 8 → 5). Le drapeau
 `config.RECHERCHE_HYBRIDE = True` devient le mode de production.
+
+### PASSAGE À L'ÉCHELLE — corpus complet (2026-07-09, 12 525 chunks)
+
+**Indexation** : 11 495 articles → 12 525 chunks (~1 030 découpés aux alinéas),
+encodage CPU **15 min 26**, insertion par lots de 5 000 (bug du plafond
+ChromaDB 5 461 corrigé), rechargement sans réencodage ✅ vérifié à l'échelle,
+métadonnées complètes (`legiarti` inclus — les liens Légifrance sont prêts).
+
+**eval_retrieval — l'A/B à deux échelles (l'argument massue)** :
+
+| Mode | 555 chunks | 12 525 chunks |
+|---|---|---|
+| Vectoriel pur | 5/6 (L1235-3 rang 8) | **4/6** — L1235-3 coulé, « que dit L3121-1 ? » absurde |
+| **Hybride** | 6/6 (L1235-3 rang 5) | **6/6** — L1235-3 rang 5 tenu, L3121-1 rang 1 |
+
+→ Sans la recherche hybride construite la veille, le corpus complet aurait
+cassé le retrieval. La fusion BM25+RRF et la garantie par numéro absorbent
+20× plus de distracteurs sans broncher.
+
+**eval_rag** : justesse **8/9** (régression : « je peux me faire virer sans
+préavis ? » → zéro citation, diagnostic en cours) · fidélité **8/9** (en
+HAUSSE : la base élargie contient les articles que les renvois citaient) ·
+garanties **15/15**. Bonus : les articles réglementaires (D3121-25...)
+enrichissent les réponses.
 
 ### Expériences envisagées (A/B sur le jeu d'évaluation)
 
