@@ -1,0 +1,170 @@
+/* Juriste du diable — interface chat sobre */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --encre: #1c1c28;
+  --papier: #f6f5f1;
+  --carte: #ffffff;
+  --accent: #7a1f2b;        /* bordeaux "juridique" */
+  --accent-doux: #f3e2e4;
+  --gris: #6b6b76;
+  --bordure: #e3e1da;
+}
+
+body {
+  font-family: Georgia, "Times New Roman", serif;
+  background: var(--papier);
+  color: var(--encre);
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 1rem 1rem 9rem;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .5rem 1rem;
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: .75rem;
+  margin-bottom: 1.25rem;
+}
+
+h1 { font-size: 1.5rem; color: var(--accent); }
+.sous-titre { color: var(--gris); font-size: .95rem; flex: 1; }
+
+#effacer {
+  font-size: .8rem;
+  background: none;
+  border: 1px solid var(--bordure);
+  border-radius: 6px;
+  padding: .3rem .7rem;
+  cursor: pointer;
+  color: var(--gris);
+}
+#effacer:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ----- le fil ----- */
+.message {
+  margin: .75rem 0;
+  padding: .9rem 1.1rem;
+  border-radius: 10px;
+  line-height: 1.55;
+}
+
+.message.utilisateur {
+  background: var(--accent-doux);
+  border: 1px solid #e8cdd1;
+  margin-left: 15%;
+}
+
+.message.assistant {
+  background: var(--carte);
+  border: 1px solid var(--bordure);
+  margin-right: 8%;
+}
+
+.message.erreur {
+  background: #fff4e5;
+  border: 1px solid #f0d9b5;
+  color: #7a4a00;
+}
+
+.sous-questions { margin-bottom: .6rem; font-size: .85rem; color: var(--gris); }
+.sous-questions summary { cursor: pointer; }
+.sous-questions ul { margin: .3rem 0 0 1.2rem; }
+
+.sources {
+  margin-top: .8rem;
+  padding-top: .6rem;
+  border-top: 1px dashed var(--bordure);
+  font-size: .9rem;
+}
+.sources ul { margin: .3rem 0 0 1.2rem; }
+.sources a { color: var(--accent); }
+
+.non-verifiees {
+  margin-top: .6rem;
+  font-size: .85rem;
+  background: #fff4e5;
+  border-radius: 6px;
+  padding: .4rem .6rem;
+  color: #7a4a00;
+}
+
+.pied {
+  margin-top: .8rem;
+  font-size: .8rem;
+  color: var(--gris);
+}
+
+/* ----- saisie ----- */
+#formulaire {
+  position: fixed;
+  bottom: 3.4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(860px, calc(100% - 2rem));
+  display: flex;
+  gap: .5rem;
+}
+
+#question {
+  flex: 1;
+  padding: .8rem 1rem;
+  font: inherit;
+  border: 1px solid var(--bordure);
+  border-radius: 10px;
+  background: var(--carte);
+}
+#question:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+#envoyer {
+  padding: .8rem 1.3rem;
+  font: inherit;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+}
+#envoyer:disabled { opacity: .5; cursor: wait; }
+
+#chargement {
+  position: fixed;
+  bottom: 7.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: .9rem;
+  color: var(--gris);
+  background: var(--carte);
+  border: 1px solid var(--bordure);
+  border-radius: 999px;
+  padding: .4rem 1rem;
+}
+
+.spinner {
+  display: inline-block;
+  width: .8em; height: .8em;
+  border: 2px solid var(--bordure);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: tour .8s linear infinite;
+  vertical-align: -0.1em;
+}
+@keyframes tour { to { transform: rotate(360deg); } }
+
+footer {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(860px, 100%);
+  text-align: center;
+  font-size: .78rem;
+  color: var(--gris);
+  background: var(--papier);
+  padding: .6rem 1rem;
+  border-top: 1px solid var(--bordure);
+}
