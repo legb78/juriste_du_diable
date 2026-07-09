@@ -78,6 +78,18 @@ LEGIFRANCE_CODE_TRAVAIL_ID = "LEGITEXT000006072050"
 # leur version en vigueur (l'historisation intégrale ferait ~30 000 appels
 # API, incompatible avec les quotas PISTE). False : les 5 thèmes seulement.
 CORPUS_COMPLET = True
+# Historique « À LA VOLÉE » (décision 2026-07-09) : le corpus indexé ne
+# contient QUE les versions courantes (dump legi-data, nettoyées). La carte
+# des versions de chaque article (ids + dates, extraite du dump) est écrite
+# dans VERSIONS_MAP_PATH ; le TEXTE d'une ancienne version n'est récupéré via
+# l'API Légifrance qu'au moment où une question datée le demande
+# (src/histoire.py), avec cache disque. Zéro pré-téléchargement massif.
+HISTORIQUE_A_LA_VOLEE = True
+# (mode alternatif conservé : False ci-dessus + True ci-dessous = tout
+# pré-télécharger et indexer, l'ancienne logique)
+HISTORISATION_COMPLETE = False
+VERSIONS_MAP_PATH = PROJECT_ROOT / "data" / "versions_map.json"
+CACHE_VERSIONS_DIR = PROJECT_ROOT / "data" / "cache_versions"
 
 # --- Thèmes du corpus (au moins 5 exigés par le sujet) ---
 # Plages d'articles indicatives du Code du travail, utilisées par build_corpus.
